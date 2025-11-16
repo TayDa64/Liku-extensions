@@ -14,16 +14,38 @@ Before running any scenario:
    ```bash
    ./install.sh
    ```
-3. Open a **new** terminal and run the doctor to catch dependency issues:
+3. Validate that your shell sees the prerequisite tooling **before** you continue:
+   - **Windows PowerShell (VS Code Insiders default)**
+     ```powershell
+     node --version
+     jq --version
+     Get-Command node
+     Get-Command jq
+     ```
+   - **Linux / macOS shells**
+     ```bash
+     which node jq
+     node --version
+     jq --version
+     ```
+   These checks document whether the host (PowerShell) already has Node 20+ and `jq` even if the WSL guest still needs its own packages.
+4. Open a **new** terminal and run the doctor to catch dependency issues:
    ```bash
    likuctl doctor
    ```
-4. Verify PATH updates by running:
+5. Verify PATH updates by running:
    ```bash
    liku status
    ```
-5. Confirm `tmux` works (`tmux -V`).
-6. On Windows, launch the Ubuntu/WSL terminal and run all commands there.
+6. Confirm `tmux` works (`tmux -V`).
+7. On Windows, decide how you want to drive the Linux runtime:
+   - **Pure WSL shell**: open the Ubuntu/WSL terminal (or VS Code “WSL: Ubuntu” window) and run the rest of this guide verbatim.
+   - **PowerShell controlling WSL**: stay in the default PowerShell terminal and prefix commands with `wsl -e bash -lc "<your command>"` to keep transcripts inside PS while the bash logic still runs in Ubuntu. This is the safest way to issue package installs such as:
+     ```powershell
+     wsl -e bash -lc "sudo apt update"
+     wsl -e bash -lc "sudo apt install -y inotify-tools sqlite3"
+     ```
+     VS Code Insiders captures the PowerShell history automatically, so these lines become part of your audit trail while still executing inside Ubuntu.
 
 With the basics complete, follow one (or all) of the environment-specific flows below.
 

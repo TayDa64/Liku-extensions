@@ -10,6 +10,11 @@ if [ -f "${CORE_DIR}/cli-environment.sh" ]; then
     source "${CORE_DIR}/cli-environment.sh"
 fi
 
+if [ -f "${CORE_DIR}/event-bus.sh" ]; then
+    # shellcheck disable=SC1090
+    source "${CORE_DIR}/event-bus.sh"
+fi
+
 source "${SCRIPT_DIR}/hotkeys.sh"
 source "${SCRIPT_DIR}/agent-table.sh"
 source "${SCRIPT_DIR}/tui-refresh-loop.sh"
@@ -25,6 +30,7 @@ liku_bookkeeper_start() {
         fi
     fi
 
+    liku_tui_init_state
     clear
     liku_tui_render
     liku_tui_input_loop

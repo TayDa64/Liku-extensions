@@ -48,13 +48,14 @@ liku_spawn_agent() {
   "session": "${session}",
   "tty": "$(liku_cli_current_tty)",
   "term": "$(liku_cli_term)",
-  "pid": "${pid}"
+    "pid": "${pid}",
+    "mode": "interactive"
 }
 EOF
 
     local payload
-    payload=$(printf '{"agent":"%s","terminalID":"%s","session":"%s","tty":"%s","term":"%s"}' \
-        "$agent_name" "$pane" "$session" "$(liku_cli_current_tty)" "$(liku_cli_term)")
+        payload=$(printf '{"agent":"%s","terminalID":"%s","session":"%s","tty":"%s","term":"%s","mode":"interactive"}' \
+                "$agent_name" "$pane" "$session" "$(liku_cli_current_tty)" "$(liku_cli_term)")
     liku_event_emit "agent.spawn" "$payload"
 }
 

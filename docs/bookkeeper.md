@@ -5,8 +5,8 @@ Bookkeeper is the terminal-native command center for supervising subagents, issu
 ## 1. Core Responsibilities
 
 1. Monitor every tmux pane spawned by LIKU (TerminalID, PID, PGID, SID).
-2. Display agent tables (status, last command, elapsed time) and hotkeys per the original scaffold.
-3. Interpret events (build errors, test failures) and surface actionable prompts.
+2. Display enriched agent tables (status, mode, terminal, current command) with arrow-key selection and a detail panel.
+3. Emit and interpret structured events (guidance, autocorrect, pause/resume) so operators can steer subagents safely.
 4. Maintain conversational UX so operators can request insights instead of memorizing commands.
 
 ## 2. Conversational Guidance Flow
@@ -31,6 +31,8 @@ Bookkeeper is the terminal-native command center for supervising subagents, issu
 
 This conversational approach mirrors the UX expectations set by VS Code, Claude Code, Gemini CLI, and Codex (approval prompts, explicit user consent).
 
+Alongside the conversational prompts, the Bookkeeper TUI now includes a selectable agent table and a contextual detail pane. Use the arrow keys to highlight an agent, then trigger hotkeys such as `D` (describe) or `L` (tail logs) to populate the detail pane with structured insight or captured tmux output. This keeps the back-and-forth grounded in the exact pane/TTY metadata recorded inside `~/.liku/state/agents/*.json`.
+
 ## 3. Guidance Memory Behavior
 
 - Active session guidance lives in `logs/guidance/<session>.json` (JSON array of prompts/responses).
@@ -48,14 +50,23 @@ Bookkeeper visualizes approval modes drawn from the Ideas research:
 | **Deny** | Claude Code sandbox default | Block actions unless explicitly allowed. |
 | **Plan Review** | Gemini agent mode | Generate a plan and require approval per step. |
 
-Operators switch modes from the TUI or via `bookkeeper set approval ask`. The chosen mode persists in SQLite and is enforced before Bookkeeper triggers subagent operations.
+Operators switch modes from the TUI or via `bookkeeper set approval ask`. The chosen mode is persisted alongside each agent record in `~/.liku/state/agents/<agent>.json` and is enforced before Bookkeeper triggers subagent operations.
 
 ## 5. Hotkeys & Commands
 
-- `R` – Refresh tables
-- `K` – Request agent termination (sends event, guardian enforces PGID kill)
-- `G` – Start guidance conversation
-- `L` – Focus guidance archive listing view (shows the latest table described above)
+| Key / Control | Purpose |
+| --- | --- |
+| `↑` / `↓` | Move the selection cursor through the live agent table. |
+| `R` | Re-render the table and detail pane without changing selection. |
+| `D` | Describe the selected agent (PID, session, pane, current command, mode). |
+| `L` | Capture and display the last ~50 lines from the agent’s tmux pane. |
+| `G` | Prompt for natural-language guidance and emit an `agent.elicit` event with the typed instructions. |
+| `A` | Prompt for an auto-correction suggestion and emit `agent.autocorrect`. |
+| `P` / `C` | Send SIGSTOP / SIGCONT to pause or resume the agent’s PID. |
+| `S` | Cycle through the predefined approval/safety modes for the highlighted agent. |
+| `W` | Jump to the agent’s tmux pane (or print the manual `tmux select-pane` command when running outside tmux). |
+| `K` | Request agent termination via `agent.kill` (guardian scripts handle the enforcement). |
+| `Q` | Quit the Bookkeeper UI. |
 
 These hotkeys complement the conversational prompts for power users who prefer keyboard flows.
 
