@@ -1,0 +1,5 @@
+{
+  "name": "test-agent",
+  "description": "Runs tests",
+  "entry": "run.sh"
+}

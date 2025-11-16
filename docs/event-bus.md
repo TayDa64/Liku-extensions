@@ -32,6 +32,9 @@ logs/
   "terminal_id": "liku:2.1",
   "pid": 12345,
   "pgid": 12345,
+  "term": "xterm-256color",
+  "tty": "/dev/pts/3",
+  "session": "liku-user-host-dev_pts_3",
   "payload": { ... },
   "meta": {
     "session": "session-abc",
@@ -41,7 +44,7 @@ logs/
 }
 ```
 
-Required fields: `ts`, `type`, `meta.session`. Optional fields omitted if not applicable.
+Required fields: `ts`, `type`, `meta.session`. Fields such as `term`, `tty`, and `session` are populated automatically by `core/cli-environment.sh` whenever the runtime emits an event so operators know exactly which CLI/TUI spawned the action.
 
 ## 3. CLI Streaming
 

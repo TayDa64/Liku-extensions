@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Placeholder daemon entrypoint
+liku_daemon_loop() {
+    while true; do sleep 60; done
+}
+liku_daemon_loop

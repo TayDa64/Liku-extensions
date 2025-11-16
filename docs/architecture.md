@@ -5,6 +5,7 @@ This document translates the brainstormed LIKU scaffold (see `Ideas/extension-br
 ## 1. Runtime Pillars
 
 1. **Terminal Orchestrator** – `core/runtime.sh` coordinates tmux sessions, TerminalIDs, PID/PGID/SID tracking, and subagent lifecycle hooks.
+   - `core/cli-environment.sh` captures the active shell/TTY/tmux context so runtime actions stay anchored to the operator’s CLI.
 2. **Context Store** – SQLite for structured metadata (agents, approvals, session summaries) plus append-only JSONL traces for high-volume events.
 3. **Event Bus** – JSONL files under `state/events/` with CLI-first streaming, mirroring VS Code Workspace Trust and Claude/Gemini/Codex approval signals.
 4. **Bookkeeper TUI** – Monitors agents, captures guidance, and converses with the operator ("list guidance files", "remove guidance #2").

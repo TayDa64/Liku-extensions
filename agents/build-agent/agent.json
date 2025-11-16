@@ -1,0 +1,5 @@
+{
+  "name": "build-agent",
+  "description": "Builds the project",
+  "entry": "run.sh"
+}

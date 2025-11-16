@@ -1,0 +1,4 @@
+agents:
+  - name: build-agent
+  - name: test-agent
+  - name: lint-agent

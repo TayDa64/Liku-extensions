@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+CORE_DIR="${HOME}/.liku/core"
+
+cmd="$1"
+shift || true
+
+case "$cmd" in
+    spawn)
+        bash "${CORE_DIR}/subagent-engine.sh" "$cmd" "$@"
+        ;;
+    bookkeeper)
+        bash "${HOME}/.liku/bookkeeper/ui.sh"
+        ;;
+    status)
+        ls "${HOME}/.liku/state/agents"
+        ;;
+    *)
+        echo "Liku Command Options:"
+        echo "  liku spawn <agent-name>"
+        echo "  liku bookkeeper"
+        echo "  liku status"
+        ;;
+esac

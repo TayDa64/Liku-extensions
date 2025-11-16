@@ -65,5 +65,6 @@ These hotkeys complement the conversational prompts for power users who prefer k
 2. **Human-friendly sentences** – Mirror the `/agents/<id>/commands` style when summarizing actions.
 3. **Explain before acting** – Always present what will happen (e.g., exact file path, PGID) before suggesting a command.
 4. **No hidden deletion** – Bookkeeper never deletes user data.
+5. **Terminal awareness** – `core/cli-environment.sh` validates that the active terminal supports curses and surfaces the detected `TERM`, `TTY`, and tmux session inside the TUI banner so operators can confirm they are steering the intended interface.
 
 With these guardrails, Bookkeeper becomes the centralized, user-friendly interface envisioned across the Ideas documents.
