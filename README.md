@@ -156,6 +156,7 @@ The `.github/workflows/yolo-supervisor.yml` workflow mirrors the “YOLO Supervi
 - `docs/bookkeeper.md` – TUI behavior, hotkeys, and guidance UX.
 - `docs/protocol.md` – Approval modes, lifecycle states, and compliance checklist.
 - `docs/installation.md` – Full prerequisite list and WSL instructions.
+- `docs/testing.md` – Step-by-step testing flows (VS Code Insiders, Copilot CLI, Gemini CLI, Codex CLI).
 - `docs/rubric.md` – Production readiness scoring.
 - `docs/foundation-plan.md` / `docs/foundation-pr-checklist.md` / `docs/foundation-pr-draft.md` – Planning artifacts for upcoming phases.
 
