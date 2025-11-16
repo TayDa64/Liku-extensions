@@ -1,0 +1,139 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://liku.dev/schemas/agents.json",
+  "title": "LIKU Agent Configuration Schema",
+  "description": "Schema for agent configuration and security policies",
+  
+  "type": "object",
+  "required": ["agents"],
+  "properties": {
+    "agents": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/agent"
+      }
+    },
+    "global_policies": {
+      "$ref": "#/definitions/securityPolicies"
+    }
+  },
+  
+  "definitions": {
+    "agent": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$",
+          "description": "Agent name (lowercase, alphanumeric and dashes only)"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable agent description"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the agent is enabled"
+        },
+        "approval_mode": {
+          "type": "string",
+          "enum": ["auto", "ask", "deny", "plan-review"],
+          "default": "ask",
+          "description": "Default approval mode for this agent"
+        },
+        "policies": {
+          "$ref": "#/definitions/securityPolicies"
+        },
+        "environment": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Environment variables for the agent"
+        },
+        "events_listen": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Event types this agent listens to"
+        },
+        "events_emit": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Event types this agent emits"
+        }
+      }
+    },
+    
+    "securityPolicies": {
+      "type": "object",
+      "properties": {
+        "allow_network": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether agent can make network connections"
+        },
+        "allow_filesystem_write": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether agent can write to filesystem"
+        },
+        "allowed_commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Whitelist of allowed commands (empty = all allowed)"
+        },
+        "blocked_commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Blacklist of blocked commands"
+        },
+        "allowed_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Whitelist of allowed paths (empty = all allowed)"
+        },
+        "blocked_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Blacklist of blocked paths"
+        },
+        "max_memory_mb": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum memory usage in MB (0 = unlimited)"
+        },
+        "max_cpu_percent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Maximum CPU usage percentage (0 = unlimited)"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum execution time in seconds (0 = unlimited)"
+        },
+        "sandbox_mode": {
+          "type": "string",
+          "enum": ["none", "tmux", "docker"],
+          "default": "tmux",
+          "description": "Sandboxing mechanism to use"
+        }
+      }
+    }
+  }
+}

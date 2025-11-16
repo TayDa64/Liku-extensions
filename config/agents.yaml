@@ -1,4 +1,85 @@
 agents:
   - name: build-agent
+    description: "Builds the project and reports compilation errors"
+    enabled: true
+    approval_mode: ask
+    events_listen:
+      - "project.build.requested"
+    events_emit:
+      - "project.build.started"
+      - "project.build.completed"
+      - "project.build.failed"
+    policies:
+      allow_network: false
+      allow_filesystem_write: true
+      allowed_commands:
+        - "make"
+        - "npm"
+        - "cargo"
+        - "go"
+        - "mvn"
+        - "gradle"
+      timeout_seconds: 600
+      sandbox_mode: tmux
+  
   - name: test-agent
+    description: "Runs test suites and reports results"
+    enabled: true
+    approval_mode: ask
+    events_listen:
+      - "project.test.requested"
+    events_emit:
+      - "project.test.started"
+      - "project.test.completed"
+      - "project.test.failed"
+    policies:
+      allow_network: false
+      allow_filesystem_write: true
+      allowed_commands:
+        - "pytest"
+        - "npm"
+        - "cargo"
+        - "go"
+        - "mvn"
+        - "gradle"
+      timeout_seconds: 300
+      sandbox_mode: tmux
+  
   - name: lint-agent
+    description: "Performs code linting and static analysis"
+    enabled: true
+    approval_mode: auto
+    events_listen:
+      - "project.lint.requested"
+    events_emit:
+      - "project.lint.started"
+      - "project.lint.completed"
+      - "project.lint.failed"
+    policies:
+      allow_network: false
+      allow_filesystem_write: false
+      allowed_commands:
+        - "eslint"
+        - "pylint"
+        - "clippy"
+        - "golint"
+      timeout_seconds: 120
+      sandbox_mode: tmux
+
+global_policies:
+  allow_network: false
+  allow_filesystem_write: true
+  blocked_commands:
+    - "rm -rf /"
+    - "sudo"
+    - "shutdown"
+    - "reboot"
+    - "mkfs"
+  blocked_paths:
+    - "/etc"
+    - "/boot"
+    - "/sys"
+    - "/proc"
+  max_memory_mb: 2048
+  timeout_seconds: 900
+  sandbox_mode: tmux

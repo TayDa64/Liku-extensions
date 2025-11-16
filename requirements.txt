@@ -1,0 +1,13 @@
+# LIKU Python Dependencies
+# Python 3.9+ required
+
+# Core dependencies
+psutil>=5.9.0  # For process management and orphaned pane detection
+
+# Optional dependencies for enhanced features
+# watchdog>=2.1.0  # Alternative file watcher (if inotifywait/fswatch unavailable)
+
+# Development dependencies (for testing)
+# pytest>=7.0.0
+# pytest-mock>=3.6.0
+# coverage>=6.0

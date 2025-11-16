@@ -1,0 +1,262 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://liku.dev/schemas/events.json",
+  "title": "LIKU Event Schema",
+  "description": "JSON schemas for all LIKU event payloads",
+  
+  "definitions": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp"
+    },
+    
+    "terminalId": {
+      "type": "string",
+      "pattern": "^[^:]+:\\d+\\.\\d+$",
+      "description": "tmux terminal identifier in format session:window.pane"
+    },
+    
+    "eventBase": {
+      "type": "object",
+      "required": ["ts", "type", "payload"],
+      "properties": {
+        "ts": { "$ref": "#/definitions/timestamp" },
+        "type": { "type": "string" },
+        "payload": { "type": "object" }
+      }
+    },
+    
+    "agentSpawnPayload": {
+      "type": "object",
+      "required": ["agent", "terminalID", "session"],
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "Agent name"
+        },
+        "terminalID": {
+          "$ref": "#/definitions/terminalId"
+        },
+        "session": {
+          "type": "string",
+          "description": "Session key"
+        },
+        "tty": {
+          "type": "string",
+          "description": "TTY device path"
+        },
+        "term": {
+          "type": "string",
+          "description": "TERM environment variable"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["interactive", "strict", "resilient", "verbose", "silent"],
+          "default": "interactive"
+        }
+      }
+    },
+    
+    "agentKillPayload": {
+      "type": "object",
+      "required": ["agent"],
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "Agent name to kill"
+        }
+      }
+    },
+    
+    "agentElicitPayload": {
+      "type": "object",
+      "required": ["agent", "instructions"],
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "Agent name"
+        },
+        "instructions": {
+          "type": "string",
+          "description": "Guidance instructions"
+        },
+        "context": {
+          "type": "string",
+          "description": "Additional context"
+        }
+      }
+    },
+    
+    "agentAutocorrectPayload": {
+      "type": "object",
+      "required": ["agent", "suggestion"],
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "Agent name"
+        },
+        "suggestion": {
+          "type": "string",
+          "description": "Auto-correction suggestion"
+        }
+      }
+    },
+    
+    "commandExecPayload": {
+      "type": "object",
+      "required": ["terminalID", "command", "cwd"],
+      "properties": {
+        "pane": {
+          "type": "string",
+          "description": "Pane ID"
+        },
+        "window": {
+          "type": "string",
+          "description": "Window name"
+        },
+        "session": {
+          "type": "string",
+          "description": "Session name"
+        },
+        "pid": {
+          "type": "integer",
+          "description": "Process ID"
+        },
+        "terminalID": {
+          "$ref": "#/definitions/terminalId"
+        },
+        "command": {
+          "type": "string",
+          "description": "Command executed"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Working directory"
+        }
+      }
+    },
+    
+    "systemRecoveredPanePayload": {
+      "type": "object",
+      "required": ["original_terminal", "dead_pane", "action"],
+      "properties": {
+        "original_terminal": {
+          "$ref": "#/definitions/terminalId"
+        },
+        "dead_pane": {
+          "type": "string",
+          "description": "Dead pane ID"
+        },
+        "new_pane": {
+          "type": "string",
+          "description": "New pane ID (if recreated)"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["recreated", "killed", "ignored"]
+        }
+      }
+    },
+    
+    "systemRecoveredSessionPayload": {
+      "type": "object",
+      "required": ["session", "action"],
+      "properties": {
+        "session": {
+          "type": "string",
+          "description": "Session name"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["created_base_session", "killed_zombie", "repaired"]
+        },
+        "windows": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Window names (for created sessions)"
+        }
+      }
+    }
+  },
+  
+  "oneOf": [
+    {
+      "allOf": [
+        { "$ref": "#/definitions/eventBase" },
+        {
+          "properties": {
+            "type": { "const": "agent.spawn" },
+            "payload": { "$ref": "#/definitions/agentSpawnPayload" }
+          }
+        }
+      ]
+    },
+    {
+      "allOf": [
+        { "$ref": "#/definitions/eventBase" },
+        {
+          "properties": {
+            "type": { "const": "agent.kill" },
+            "payload": { "$ref": "#/definitions/agentKillPayload" }
+          }
+        }
+      ]
+    },
+    {
+      "allOf": [
+        { "$ref": "#/definitions/eventBase" },
+        {
+          "properties": {
+            "type": { "const": "agent.elicit" },
+            "payload": { "$ref": "#/definitions/agentElicitPayload" }
+          }
+        }
+      ]
+    },
+    {
+      "allOf": [
+        { "$ref": "#/definitions/eventBase" },
+        {
+          "properties": {
+            "type": { "const": "agent.autocorrect" },
+            "payload": { "$ref": "#/definitions/agentAutocorrectPayload" }
+          }
+        }
+      ]
+    },
+    {
+      "allOf": [
+        { "$ref": "#/definitions/eventBase" },
+        {
+          "properties": {
+            "type": { "const": "command.exec" },
+            "payload": { "$ref": "#/definitions/commandExecPayload" }
+          }
+        }
+      ]
+    },
+    {
+      "allOf": [
+        { "$ref": "#/definitions/eventBase" },
+        {
+          "properties": {
+            "type": { "const": "system.recovered.pane" },
+            "payload": { "$ref": "#/definitions/systemRecoveredPanePayload" }
+          }
+        }
+      ]
+    },
+    {
+      "allOf": [
+        { "$ref": "#/definitions/eventBase" },
+        {
+          "properties": {
+            "type": { "const": "system.recovered.session" },
+            "payload": { "$ref": "#/definitions/systemRecoveredSessionPayload" }
+          }
+        }
+      ]
+    }
+  ]
+}
