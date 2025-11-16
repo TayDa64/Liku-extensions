@@ -82,7 +82,13 @@ With the basics complete, follow one (or all) of the environment-specific flows 
    ```bash
    liku event stream --since 1m | jq '.'
    ```
-10. **Review artifacts** inside the Explorer:
+10. **Exercise the tmux exec wrapper** to prove Option A is live:
+   ```bash
+   liku exec --window general -- echo "tmux-safe"
+   liku panes
+   ```
+   - The `exec` command should print the tmux pane identifier and `liku panes` should list the recorded TerminalID, status, and last command.
+11. **Review artifacts** inside the Explorer:
     - `~/.liku/state/agents/*.json` should list each agent with the detected terminal metadata.
     - `state/events/*.event` files should reflect every spawn/bookkeeper action.
 

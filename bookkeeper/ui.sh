@@ -17,6 +17,7 @@ fi
 
 source "${SCRIPT_DIR}/hotkeys.sh"
 source "${SCRIPT_DIR}/agent-table.sh"
+source "${SCRIPT_DIR}/pane-table.sh"
 source "${SCRIPT_DIR}/tui-refresh-loop.sh"
 source "${SCRIPT_DIR}/tui-input-loop.sh"
 source "${SCRIPT_DIR}/tui-layout.sh"

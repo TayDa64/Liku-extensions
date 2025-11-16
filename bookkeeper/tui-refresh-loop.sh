@@ -44,5 +44,6 @@ liku_tui_render() {
     clear
     liku_tui_layout
     liku_tui_render_agents
+    liku_tui_render_panes
     liku_tui_render_detail
 }

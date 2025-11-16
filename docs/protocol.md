@@ -68,4 +68,16 @@ Bookkeeper also surfaces the current mode in its status bar.
 - [ ] Guidance logs listed/deleted via conversational prompts.
 - [ ] HTTP endpoints disabled until approvals + guidance defaults configured.
 
+## 9. tmux Safe-Execution Protocol
+
+Option A from `Ideas/extension-brainstorming-PIDs` is now implemented via the `liku exec` and `liku panes` commands:
+
+1. **Dedicated session.** `liku exec` ensures the AI-controlled session `<session-key>-agent` exists, bootstraps the `general`, `background`, `logging`, and `sandbox` windows, and never reuses the operator's active TTY.
+2. **Window hygiene.** Before launching a command, LIKU inspects every pane in the target window via `tmux list-panes`. If all panes are busy, it automatically splits a fresh pane so running jobs remain untouched.
+3. **Structured launch.** Commands are issued with `tmux send-keys` and recorded to `~/.liku/state/panes/pane-*.json` together with the TerminalID (`session:window.pane`), PID, cwd, and timestamp.
+4. **Telemetry.** Each invocation emits a `command.exec` event so Bookkeeper and downstream tooling can narrate the activity stream.
+5. **Inspection.** `liku panes` renders the recorded metadata (TerminalID, status, last command, updated timestamp) so operators or higher-level agents can decide where to resume work.
+
+These guarantees satisfy Option A’s promises: AI never hijacks the human terminal, always inspects pane state, tracks every job, and maintains complete tmux awareness for later guidance or remediation.
+
 This protocol ensures LIKU remains safe, auditable, and aligned with industry standards as the extension matures.

@@ -13,6 +13,8 @@ Usage:
   liku bookkeeper
   liku status
   liku event stream
+    liku exec [--window <name>] [--cwd <path>] [--label <text>] -- <command>
+    liku panes
 
 Environment:
   Files are managed under ~/.liku. Ensure ./install.sh has been run.
@@ -65,6 +67,12 @@ case "$cmd" in
                 exit 1
                 ;;
         esac
+        ;;
+    exec)
+        bash "${CORE_DIR}/tmux-agent.sh" exec "$@"
+        ;;
+    panes)
+        bash "${CORE_DIR}/tmux-agent.sh" list "$@"
         ;;
     *)
         usage

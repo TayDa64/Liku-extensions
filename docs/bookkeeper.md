@@ -6,8 +6,9 @@ Bookkeeper is the terminal-native command center for supervising subagents, issu
 
 1. Monitor every tmux pane spawned by LIKU (TerminalID, PID, PGID, SID).
 2. Display enriched agent tables (status, mode, terminal, current command) with arrow-key selection and a detail panel.
-3. Emit and interpret structured events (guidance, autocorrect, pause/resume) so operators can steer subagents safely.
-4. Maintain conversational UX so operators can request insights instead of memorizing commands.
+3. Surface tmux-agent activity (`liku exec`) alongside the agent table so users can confirm Option A sessions are running even when the IDE shows a single terminal buffer.
+4. Emit and interpret structured events (guidance, autocorrect, pause/resume) so operators can steer subagents safely.
+5. Maintain conversational UX so operators can request insights instead of memorizing commands.
 
 ## 2. Conversational Guidance Flow
 
@@ -69,6 +70,18 @@ Operators switch modes from the TUI or via `bookkeeper set approval ask`. The ch
 | `Q` | Quit the Bookkeeper UI. |
 
 These hotkeys complement the conversational prompts for power users who prefer keyboard flows.
+
+### Tmux Activity Panel
+
+Directly beneath the agent list, Bookkeeper renders the latest entries from `~/.liku/state/panes/pane-*.json`, which are produced every time `liku exec -- <command>` runs. The table shows:
+
+- `Terminal ID` – the tmux `session:window.pane` identifier (Option A TerminalID).
+- `Status` – IDLE/RUNNING/WATCHING derived from `tmux display-message`.
+- `Label` – either the exec `--label` or the tmux window name.
+- `Last Command` – truncated shell command captured at launch time.
+- `Updated` – the ISO8601 timestamp stored in the pane JSON.
+
+This ensures contributors can see that LIKU spun up new panes/sessions even if their IDE only shows a single PowerShell/WSL buffer, satisfying the UI best practices called out in the Ideas documents.
 
 ## 6. UX Principles
 
