@@ -1,74 +1,65 @@
 # LIKU
 
-**Wisdom for Terminals.** Liku is a terminal-native multi-agent orchestration framework that coordinates tmux-based subagents, a Bookkeeper TUI, and an auditable event bus. Everything runs from the CLI (or WSL on Windows) to keep approvals, telemetry, and remediation trails transparent.
+**Wisdom for Terminals.** LIKU is a terminal-native multi-agent runtime that supervises tmux panes, coordinates Bookkeeper (a curses TUI), and records every action in JSONL event streams. The project is currently in the “runtime + Bookkeeper scaffold” phase, so the focus is on reliable CLI workflows with explicit human oversight.
 
-## Why LIKU
+## Feature Highlights
 
-- **Terminal orchestrator:** `core/runtime.sh` tracks TerminalIDs, PID/PGID/SID data, and tmux panes for every subagent.
-- **Bookkeeper TUI:** A curses-style dashboard (see `bookkeeper/*.sh`) that shows active agents, hotkeys, and conversational guidance controls.
-- **Event bus:** Append-only JSONL logs under `state/events/` drive auditing, remediation summaries, and future plugin integrations.
-- **Guidance memory:** Conversations persist as JSON files under `logs/guidance/` and are only removed when the operator explicitly deletes them.
-- **CLI-first safety:** Installer, approvals, and telemetry mirror UX patterns from VS Code Workspace Trust, Claude Code permissions, Gemini Agent Mode, and OpenAI Codex CLI.
-- **Session awareness:** `core/cli-environment.sh` captures `TERM`, `TTY`, `TMUX`, and WSL data so LIKU always spawns agents and renders TUIs inside the same environment the operator is using.
+- **Terminal orchestrator:** `core/runtime.sh` and `core/subagent-engine.sh` bootstrap tmux sessions, assign TerminalIDs, and persist agent metadata (name, PID, session, terminal).
+- **Environment awareness:** `core/cli-environment.sh` captures `TERM`, `TTY`, tmux session, and WSL details so spawned agents and the Bookkeeper TUI always run inside the same environment as the operator.
+- **Bookkeeper TUI:** `bookkeeper/*.sh` renders an environment banner plus an agent table and exposes hotkeys (R refresh, K emit `agent.kill`, G emit `agent.elicit`, Q quit). Conversational guidance panes are planned but not yet implemented.
+- **Event bus:** `core/event-bus.sh` writes timestamped JSON lines under `~/.liku/state/events` and supports live streaming via `liku event stream`.
+- **Guidance archives (future):** `logs/guidance/` is a manual holding area today; automated persistence and deletion flows will land with the guidance feature work.
+- **Safety discipline:** CLI permissions mirror patterns from VS Code Workspace Trust, Claude Code permissioning, Gemini Agent Mode, and OpenAI Codex plan approvals.
 
 ## Architecture Snapshot
 
 | Pillar | Responsibilities | Source |
 | --- | --- | --- |
-| Terminal Orchestrator | tmux pane lifecycle, TerminalID allocation, PID/PGID/SID enforcement | `core/runtime.sh`, `core/pid-tools.sh`, `core/terminalID.sh` |
-| Context Store | SQLite + JSONL metadata for agents, approvals, and summaries | `core/context-store.sh`, `state/sessions/*` |
-| Event Bus | JSONL streaming, remediation capture, approval hooks | `core/event-bus.sh`, `docs/event-bus.md` |
-| Bookkeeper | TUI hotkeys, conversational guidance, approval surface | `bookkeeper/*.sh`, `docs/bookkeeper.md` |
-| Safety Guards | Approval states, HTTP gating, process cleanup | `core/safety-guards.sh`, `docs/protocol.md` |
+| Terminal Orchestrator | tmux lifecycle, PID tools, TerminalID registry | `core/runtime.sh`, `core/pid-tools.sh`, `core/terminalID.sh` |
+| Context Store | Future SQLite + JSONL metadata plumbing | `core/context-store.sh`, `state/sessions/*` |
+| Event Bus | JSONL emission, streaming, remediation hooks | `core/event-bus.sh`, `docs/event-bus.md` |
+| Bookkeeper | TUI layout, hotkeys, environment banner | `bookkeeper/*.sh`, `docs/bookkeeper.md` |
+| Safety Guards | Approval modes, tmux guard rails, HTTP gating | `core/safety-guards.sh`, `docs/protocol.md` |
 
-See `docs/architecture.md` for the full blueprint and `docs/foundation-plan.md` for the phase roadmap.
+See `docs/architecture.md` and `docs/foundation-plan.md` for the complete roadmap.
 
 ## Repository Layout
 
 | Path | Description |
 | --- | --- |
-| `bin/` | CLI entrypoints (`liku`, `liku-bookkeeper`, `liku-eventd`, etc.). |
-| `core/` | Runtime shell scripts (orchestrator, event bus, state machine, PID tools). |
-| `core/cli-environment.sh` | Detects the active terminal/TMUX/WSL context and enforces tmux session reuse. |
-| `bookkeeper/` | TUI layout, input loops, and hotkey handlers. |
-| `agents/` | Sample build/test/lint agents plus reusable templates. |
+| `bin/` | CLI entrypoints (`liku`, `liku-bookkeeper`, `liku-eventd`). |
+| `core/` | Runtime shell scripts, PID utilities, event bus, CLI env helpers. |
+| `bookkeeper/` | TUI layout, input loop, hotkeys, and refresh loops. |
+| `agents/` | Sample build/test/lint agents plus templates. |
 | `config/` | YAML stubs for agents, paths, and runtime defaults. |
-| `state/` | Session databases, agent metadata, and event streams. |
-| `logs/guidance/` | Long-lived conversational guidance archives. |
-| `docs/` | Architecture, protocol, installation, rubric, and PR templates. |
+| `state/` | Session, agent, and event metadata written at runtime. |
+| `logs/guidance/` | Operator guidance archives (manual retention). |
+| `docs/` | Architecture, protocol, installation, rubric, testing, and PR artifacts. |
 
 ## Requirements
 
-- POSIX shell (bash/zsh)
-- `tmux`, `inotifywait`, `sqlite3`
-- Node.js 20+ (agent tooling)
-- Python 3.11+ (optional helpers)
-- Git
+| Component | Notes |
+| --- | --- |
+| POSIX shell | bash or zsh. Windows users must run inside WSL (Ubuntu). |
+| tmux 3.2+ | Required for pane orchestration. |
+| `inotifywait` | Install via `sudo apt install inotify-tools`. |
+| `sqlite3` | Placeholder for the context store (Phase 2). |
+| Node.js 20+ | Agent tooling + potential bundlers. |
+| Python 3.11+ | Optional helper scripts/tests. |
+| Git | Used for cloning and updates. |
 
-### Windows Support (WSL Only)
-
-1. Enable WSL: `wsl --install -d Ubuntu`
-2. Run all commands from the Ubuntu shell.
-3. Do **not** execute installers directly from PowerShell/CMD.
-
-## CLI/TUI Awareness
-
-- Every CLI entrypoint runs `core/cli-environment.sh`, which snapshots the active shell, terminal type, tty path, tmux session, and WSL detection into `~/.liku/state/session/env.json`.
-- `liku spawn <agent>` now reuses the tmux session that matches your current terminal (if you are already inside tmux it splits the existing pane; otherwise it creates/reuses a session derived from your TTY).
-- Bookkeeper refuses to start in `TERM=dumb` shells and displays a banner such as `TERM=xterm-256color | TTY=/dev/pts/3 | Session=liku-user-host-dev_pts_3` to prove which interface it is targeting.
-- Agent state files under `state/agents/<name>.json` include the detected `term`, `tty`, and session name so you can audit where each subprocess lives.
-- Event payloads emitted on `agent.spawn` include the same metadata, making it easy to stream the audit trail or debug mismatched sessions.
+> **Windows support**: run `wsl --install -d Ubuntu`, launch the Ubuntu shell, and perform **all** commands there. PowerShell/CMD installers are unsupported.
 
 ## Installation
 
 ```bash
 git clone <repo-url> liku
 cd liku
-chmod +x install.sh uninstall.sh
+chmod +x install.sh uninstall.sh bin/* core/*.sh bookkeeper/*.sh agents/*/*.sh
 ./install.sh
 ```
 
-The installer copies runtime files to `~/.liku`, places binaries in `~/.liku/bin`, and appends the PATH export snippet to `.bashrc` if it is missing. Re-run `./install.sh` after pulling new changes to update the local runtime.
+The installer copies runtime assets into `~/.liku`, installs CLI binaries into `~/.liku/bin`, and adds that directory to `.bashrc` if it is missing. Open a **new** terminal afterwards so PATH updates take effect. Re-run `./install.sh` whenever you pull new changes.
 
 ### Uninstall
 
@@ -76,88 +67,81 @@ The installer copies runtime files to `~/.liku`, places binaries in `~/.liku/bin
 ./uninstall.sh
 ```
 
-`uninstall.sh` removes `~/.liku` but intentionally leaves `logs/guidance` and `/agents/<id>/commands` so you can archive them manually.
+This removes `~/.liku` but leaves `logs/guidance` and `/agents/<id>/commands` untouched for manual archiving.
 
-## Post-Install Checklist
+## CLI Reference
 
-```bash
-liku status          # lists managed agents
-liku bookkeeper      # launches the TUI inside the current terminal
-liku event stream    # tails JSONL events once event tooling is wired
-```
+| Command | Description |
+| --- | --- |
+| `liku spawn <agent>` | Launches the agent’s `run.sh` inside a tmux pane tied to your current terminal session. |
+| `liku bookkeeper` | Opens the Bookkeeper TUI (requires a non-`dumb` terminal). |
+| `liku status` | Prints a table of known agents, their PIDs, and tmux session names. |
+| `liku event stream` | Streams JSONL events from `~/.liku/state/events`. |
 
-- Ensure `tmux` is running and accessible from the current shell.
-- Review `config/liku.yaml` and `config/agents.yaml` to confirm agent names, default paths, and upcoming approval policies.
-- For Windows users, open a new WSL terminal (so PATH updates from `.bashrc` are picked up) before launching `liku`.
+## Quick Start
 
-## Working with Agents
-
-Agents live under `agents/<name>/` and are defined by `agent.json` + shell handlers. Use the CLI to start them inside dedicated tmux panes:
-
-```bash
-liku spawn build-agent
-liku spawn test-agent
-liku spawn lint-agent
-```
-
-- Metadata for each agent is stored under `state/agents/<name>.json` and includes TerminalID, PID, PGID, and SID.
-- Error output containing `ERROR|FAIL|Exception|Traceback` automatically triggers remediation summaries under `/agents/<name>/commands/YYYYMMDD.jsonl` per `docs/event-bus.md`.
-
-## Bookkeeper Guidance Workflow
-
-Bookkeeper acts as the operator’s co-pilot:
-
-1. **Monitor:** Hotkeys (see `docs/bookkeeper.md`) refresh tables, terminate agents, or open the guidance pane.
-2. **Converse:** Ask “List guidance files” to display every JSON archive with ID, session, size, and timestamps.
-3. **Retain:** Guidance logs (`logs/guidance/*.json`) persist until *you* remove them. Bookkeeper never deletes data—when you say “Remove guidance #n,” it confirms the path and suggests the manual command:
-
+1. Install dependencies (`tmux`, `inotify-tools`, `sqlite3`).
+2. Run `./install.sh` and open a new terminal.
+3. Spawn sample agents:
     ```bash
-    rm logs/guidance/guidance-2025-11-16.json
+    liku spawn build-agent
+    liku spawn test-agent
+    ```
+4. Inspect their metadata:
+    ```bash
+    liku status
+    cat ~/.liku/state/agents/build-agent.json
+    ```
+5. Launch Bookkeeper:
+    ```bash
+    liku bookkeeper
+    ```
+    Confirm the banner prints the detected `TERM`, `TTY`, and session.
+6. Watch the audit trail:
+    ```bash
+    liku event stream | jq '.'
     ```
 
-4. **Approve:** Approval modes (`auto`, `ask`, `deny`, `plan-review`) follow the protocol described in `docs/protocol.md`. Configure your default mode in `config/liku.yaml` (or the future SQLite store) before enabling HTTP or plugin surfaces.
+## Bookkeeper & Guidance
 
-## Event Streaming & Auditing
+- **Hotkeys:** R (refresh table), K (emit `agent.kill` for the selected agent), G (emit `agent.elicit` to request guidance), Q (quit). Guidance panes are not wired yet—events simply record intent in the JSONL log for auditing.
+- **Environment banner:** Each render shows `TERM`, `TTY`, and the tmux session so you always know which CLI context you are controlling.
+- **Guidance archives:** `logs/guidance/` is a manual holding area today. Create/delete JSON files yourself (e.g., `logs/guidance/guidance-2025-11-16.json`) until the guided flows arrive.
+- **Approvals:** Modes (`auto`, `ask`, `deny`, `plan-review`) are outlined in `docs/protocol.md` and will be enforced once the context store lands. In the interim, store your preferred mode in `config/liku.yaml` or a personal note.
 
-- Daily JSONL files sit under `state/events/` and can be tailed with `liku event stream --since 5m | jq '.'` once the CLI event helper (`liku-eventd`) is wired in.
-- Guidance actions emit `guidance.append|guidance.list|guidance.delete.requested` events for auditability.
-- Remediation summaries are mirrored into `/agents/<id>/commands/DATE.jsonl` using the sentence template documented in `docs/event-bus.md`.
+## Auditing & Telemetry
 
-Before exposing HTTP callbacks or external plugins, run:
+- Events live under `~/.liku/state/events/*.event` and look like `{"ts":"2025-11-16T12:00:00Z","type":"agent.spawn","payload":{"agent":"build-agent","session":"liku-user-dev_pts_3","tty":"/dev/pts/3","term":"xterm-256color"}}`.
+- `liku event stream` outputs both historical events and new ones using `inotifywait`. Pipe to `jq` for filtering.
+- Automated remediation logging is on the roadmap. For now, emit `agent.error` events manually (e.g., `liku event stream` + `Ctrl+C` then `bash ~/.liku/core/event-bus.sh emit agent.error '{"agent":"build-agent"}'`) or capture notes under `/agents/<id>/commands/DATE.jsonl` yourself.
 
-```bash
-liku event stream --since 5m
-```
+## Configuration
 
-and verify events populate in real time.
+- `config/agents.yaml` – registers which agents `liku spawn` should recognize.
+- `config/paths.yaml` – controls the runtime root (default `~/.liku`).
+- `config/liku.yaml` – placeholder for approvals/guidance defaults until the context store lands.
 
-## Configuration & Customization
+## Troubleshooting & Known Issues
 
-- **Agents:** Update `config/agents.yaml` to register or remove agent names.
-- **Paths:** `config/paths.yaml` controls the default runtime root (`~/.liku`).
-- **Approvals & Guidance Defaults:** Until the SQLite context store is fully implemented, keep provisional settings inside `config/liku.yaml` or a custom JSON file under `~/.liku/config/` (see `docs/installation.md`).
+- **`liku` not found:** Open a fresh terminal or manually export `PATH="$PATH:$HOME/.liku/bin"` in `.bashrc`.
+- **Missing dependencies:** Install `tmux`, `inotify-tools`, and `sqlite3` before spawning agents.
+- **Bookkeeper fails to launch:** Ensure `$TERM` is not `dumb` and that you are running inside WSL/Linux.
+- **Gemini CLI extension crash:** If you see `Error loading commands from ...\.gemini\extensions\<name>\commands: DOMException [AbortError]`, delete the referenced extension folder (replace `<name>` with the ID from your error) and reinstall the CLI:
+    ```powershell
+    Remove-Item -Recurse -Force "$env:USERPROFILE\.gemini\extensions\<name>"
+    npm install -g @google/gemini-cli@latest
+    ```
+    Then retry the steps in `docs/testing.md`.
 
-## Continuous Monitoring
+## Documentation Map
 
-The `.github/workflows/yolo-supervisor.yml` workflow mirrors the “YOLO Supervisor” checklist to ensure every PR labeled `yolo` kicks off monitoring runs. Refer to `docs/foundation-pr-checklist.md` before opening a PR so coding agents and the Bookkeeper TUI stay in sync.
+- `docs/installation.md` – Detailed prerequisite and WSL guidance.
+- `docs/testing.md` – Environment-specific verification flows (VS Code Insiders, Copilot CLI, Gemini CLI, Codex CLI) plus Gemini CLI workarounds.
+- `docs/architecture.md` – Full blueprint of runtime pillars.
+- `docs/event-bus.md` – JSONL schema and streaming behavior.
+- `docs/bookkeeper.md` – TUI layout, hotkeys, and guidance UX.
+- `docs/protocol.md` – Approval models and lifecycle expectations.
+- `docs/rubric.md` – Production-readiness criteria.
+- `docs/foundation-plan.md`, `docs/foundation-pr-checklist.md`, `docs/foundation-pr-draft.md` – Phase tracking assets.
 
-## Troubleshooting
-
-- **`liku` not found:** Open a new shell session or manually add `export PATH="$PATH:$HOME/.liku/bin"` to `.bashrc`.
-- **tmux errors:** Confirm `tmux` is installed (`tmux -V`) and accessible from WSL if you’re on Windows.
-- **Bookkeeper blank screen:** Ensure `$TERM` supports curses (e.g., `xterm-256color`) and that `bookkeeper/*.sh` files remain executable.
-- **Missing dependencies:** Install `inotifywait` (`sudo apt install inotify-tools`) and `sqlite3` before spawning agents.
-- **Guidance files piling up:** Use Bookkeeper’s listing flow to identify old files, then manually delete them with `rm logs/guidance/<file>.json`.
-
-## Additional Documentation
-
-- `docs/architecture.md` – Detailed runtime pillars and roadmap.
-- `docs/event-bus.md` – JSONL schema, CLI streaming, and remediation logging.
-- `docs/bookkeeper.md` – TUI behavior, hotkeys, and guidance UX.
-- `docs/protocol.md` – Approval modes, lifecycle states, and compliance checklist.
-- `docs/installation.md` – Full prerequisite list and WSL instructions.
-- `docs/testing.md` – Step-by-step testing flows (VS Code Insiders, Copilot CLI, Gemini CLI, Codex CLI).
-- `docs/rubric.md` – Production readiness scoring.
-- `docs/foundation-plan.md` / `docs/foundation-pr-checklist.md` / `docs/foundation-pr-draft.md` – Planning artifacts for upcoming phases.
-
-With the scaffold in place, you can iterate on agents, approvals, and guidance memory while keeping every action auditable from the terminal.
+With this scaffold in place you can safely iterate on additional agents, approvals, and observability while keeping every action auditable from the terminal.

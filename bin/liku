@@ -3,24 +3,71 @@
 set -euo pipefail
 
 CORE_DIR="${HOME}/.liku/core"
+BOOKKEEPER_DIR="${HOME}/.liku/bookkeeper"
+STATE_AGENT_DIR="${HOME}/.liku/state/agents"
 
-cmd="$1"
+usage() {
+    cat <<'USAGE'
+Usage:
+  liku spawn <agent-name>
+  liku bookkeeper
+  liku status
+  liku event stream
+
+Environment:
+  Files are managed under ~/.liku. Ensure ./install.sh has been run.
+USAGE
+}
+
+liku_status() {
+    if [ ! -d "$STATE_AGENT_DIR" ] || ! compgen -G "${STATE_AGENT_DIR}/*.json" >/dev/null; then
+        printf "[Liku] No agents have been spawned yet.\n"
+        return
+    fi
+
+    printf 'AGENT\tPID\tSESSION\n'
+    for file in "${STATE_AGENT_DIR}"/*.json; do
+        [ -e "$file" ] || continue
+        local agent pid session
+        agent=$(basename "$file" .json)
+        pid=$(awk -F'"' '/"pid"/ {print $4}' "$file")
+        session=$(awk -F'"' '/"session"/ {print $4}' "$file")
+        printf '%s\t%s\t%s\n' "$agent" "${pid:-?}" "${session:-?}"
+    done
+}
+
+cmd="${1:-}"
+if [ -z "$cmd" ]; then
+    usage
+    exit 1
+fi
 shift || true
 
 case "$cmd" in
     spawn)
-        bash "${CORE_DIR}/subagent-engine.sh" "$cmd" "$@"
+        bash "${CORE_DIR}/subagent-engine.sh" spawn "$@"
         ;;
     bookkeeper)
-        bash "${HOME}/.liku/bookkeeper/ui.sh"
+        bash "${BOOKKEEPER_DIR}/ui.sh"
         ;;
     status)
-        ls "${HOME}/.liku/state/agents"
+        liku_status
+        ;;
+    event)
+        subcmd="${1:-}"
+        shift || true
+        case "$subcmd" in
+            stream)
+                bash "${CORE_DIR}/event-bus.sh" stream "$@"
+                ;;
+            *)
+                printf '[Liku] Unknown event subcommand. Try "liku event stream".\n' >&2
+                exit 1
+                ;;
+        esac
         ;;
     *)
-        echo "Liku Command Options:"
-        echo "  liku spawn <agent-name>"
-        echo "  liku bookkeeper"
-        echo "  liku status"
+        usage
+        exit 1
         ;;
 esac

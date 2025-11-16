@@ -138,6 +138,13 @@ This demonstrates that LIKU behaves consistently when command sequences come fro
    tail ~/.liku/state/events/*.event
    ```
 
+> **Gemini CLI extension crash**: If you see an error similar to `Error loading commands from ... .gemini\extensions\nanobanana\commands: DOMException [AbortError]`, delete the offending extension directory and reinstall the CLI:
+> ```powershell
+> Remove-Item -Recurse -Force "$env:USERPROFILE\.gemini\extensions\nanobanana"
+> npm install -g @google/gemini-cli@latest
+> ```
+> Then rerun `gemini agent start --name liku-audit`. The CLI falls back to its core commands once third-party extensions are removed.
+
 This validates LIKU from inside the Gemini CLI’s agent workflow and mirrors the plan/approval UX highlighted in the protocol document.
 
 ---
