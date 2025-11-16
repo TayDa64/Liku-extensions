@@ -14,12 +14,16 @@ Before running any scenario:
    ```bash
    ./install.sh
    ```
-3. Verify PATH updates by opening a **new** terminal and running:
+3. Open a **new** terminal and run the doctor to catch dependency issues:
+   ```bash
+   likuctl doctor
+   ```
+4. Verify PATH updates by running:
    ```bash
    liku status
    ```
-4. Confirm `tmux` works (`tmux -V`).
-5. On Windows, launch the Ubuntu/WSL terminal and run all commands there.
+5. Confirm `tmux` works (`tmux -V`).
+6. On Windows, launch the Ubuntu/WSL terminal and run all commands there.
 
 With the basics complete, follow one (or all) of the environment-specific flows below.
 

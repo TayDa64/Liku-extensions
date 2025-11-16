@@ -77,27 +77,29 @@ This removes `~/.liku` but leaves `logs/guidance` and `/agents/<id>/commands` un
 | `liku bookkeeper` | Opens the Bookkeeper TUI (requires a non-`dumb` terminal). |
 | `liku status` | Prints a table of known agents, their PIDs, and tmux session names. |
 | `liku event stream` | Streams JSONL events from `~/.liku/state/events`. |
+| `likuctl doctor` | Runs environment diagnostics (dependencies, CRLF endings, install checks). |
 
 ## Quick Start
 
 1. Install dependencies (`tmux`, `inotify-tools`, `sqlite3`).
 2. Run `./install.sh` and open a new terminal.
-3. Spawn sample agents:
+3. Confirm your environment with `likuctl doctor` (install any missing dependencies it reports).
+4. Spawn sample agents:
     ```bash
     liku spawn build-agent
     liku spawn test-agent
     ```
-4. Inspect their metadata:
+5. Inspect their metadata:
     ```bash
     liku status
     cat ~/.liku/state/agents/build-agent.json
     ```
-5. Launch Bookkeeper:
+6. Launch Bookkeeper:
     ```bash
     liku bookkeeper
     ```
     Confirm the banner prints the detected `TERM`, `TTY`, and session.
-6. Watch the audit trail:
+7. Watch the audit trail:
     ```bash
     liku event stream | jq '.'
     ```
@@ -126,6 +128,7 @@ This removes `~/.liku` but leaves `logs/guidance` and `/agents/<id>/commands` un
 - **`liku` not found:** Open a fresh terminal or manually export `PATH="$PATH:$HOME/.liku/bin"` in `.bashrc`.
 - **Missing dependencies:** Install `tmux`, `inotify-tools`, and `sqlite3` before spawning agents.
 - **Bookkeeper fails to launch:** Ensure `$TERM` is not `dumb` and that you are running inside WSL/Linux.
+- **Environment drift:** Run `likuctl doctor` after installing or pulling updates to confirm dependencies, CRLF status, and agent directories.
 - **Gemini CLI extension crash:** If you see `Error loading commands from ...\.gemini\extensions\<name>\commands: DOMException [AbortError]`, delete the referenced extension folder (replace `<name>` with the ID from your error) and reinstall the CLI:
     ```powershell
     Remove-Item -Recurse -Force "$env:USERPROFILE\.gemini\extensions\<name>"

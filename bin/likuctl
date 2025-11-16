@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CORE_DIR="${HOME}/.liku/core"
+
+usage() {
+    cat <<'USAGE'
+Usage:
+  likuctl doctor
+USAGE
+}
+
+cmd="${1:-}"
+if [ -z "$cmd" ]; then
+    usage
+    exit 1
+fi
+shift || true
+
+case "$cmd" in
+    doctor)
+        bash "${CORE_DIR}/doctor.sh" "$@"
+        ;;
+    *)
+        usage
+        exit 1
+        ;;
+ esac

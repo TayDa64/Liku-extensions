@@ -15,7 +15,10 @@ cp -r config       "${PREFIX}/"
 cp -r bookkeeper   "${PREFIX}/"
 
 if ! grep -q 'LIKUPATH' "${HOME}/.bashrc" 2>/dev/null; then
-    echo 'export PATH="$PATH:'"${PREFIX}/bin"'" >> "${HOME}/.bashrc"
+    {
+        echo '# LIKUPATH'
+        echo "export PATH=\"\$PATH:${PREFIX}/bin\""
+    } >> "${HOME}/.bashrc"
 fi
 
 echo "[Liku] Installed successfully."
