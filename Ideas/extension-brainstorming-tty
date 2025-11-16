@@ -1,0 +1,306 @@
+Excellent — we’ll proceed with **Option A**, which is where the real power begins:
+Designing the **Tier 2 AI–Terminal Protocol** using **tmux** so the AI can safely execute commands without interfering with running processes.
+
+This is the protocol used by real DevOps agents and remote orchestration tools.
+
+---
+
+# 🧩 **Option A — Tier 2 Protocol: AI Terminal Orchestration Using tmux**
+
+This protocol allows AI to:
+
+* create new terminals on demand
+* avoid interfering with running shells
+* keep long-running tasks isolated
+* inspect terminals before using them
+* attach/detach without breaking user workflow
+* maintain awareness of what is happening in each pane/window
+
+This is your first step toward a true *AI-managed shell environment*.
+
+---
+
+# 🟩 **Part 1 — The Core Idea: "AI Never Runs Commands In the User's Active TTY"**
+
+Instead:
+
+### **AI only works inside a tmux session it manages.**
+
+It might be called:
+
+```
+ai-session
+```
+
+Or:
+
+```
+liku-agent
+```
+
+This prevents AI from breaking:
+
+* your visible terminal
+* your active builds
+* commands you are typing
+* long-running processes
+
+---
+
+# 🟩 **Part 2 — AI tmux Session Structure**
+
+Inside the AI’s tmux environment:
+
+```
+ai-session/
+   window 1 — general commands
+   window 2 — background jobs
+   window 3 — logging
+   window 4 — experiments/sandbox
+```
+
+Window 1 may contain:
+
+```
+pane 1 — shell
+pane 2 — process monitor (htop/top/watch)
+```
+
+Window 2:
+
+```
+pane 1 — long-running command
+```
+
+Window 3:
+
+```
+pane 1 — aggregated logs (tail -f)
+```
+
+AI always knows:
+
+* window_id
+* pane_id
+* PID of each shell
+* what each is doing
+
+This is where `tmux list-sessions`, `tmux list-windows`, `tmux list-panes` enter.
+
+---
+
+# 🟩 **Part 3 — AI Must Run All Commands Through a Safety Wrapper**
+
+Before AI runs `make build`, it performs:
+
+### **tmux Pre-check #1 — Ensure the AI session exists**
+
+```bash
+tmux has-session -t ai-session 2>/dev/null || tmux new -d -s ai-session
+```
+
+### **tmux Pre-check #2 — Check the current window/pane isn’t busy**
+
+```bash
+tmux list-panes -t ai-session -F "#{pane_id} #{pane_active} #{pane_current_command}"
+```
+
+If the current pane is running:
+
+* `python`
+* `node`
+* `sleep`
+* `cargo build`
+* `make`
+* anything with status `R` (running)
+
+AI must **not run new commands in that pane**.
+
+Instead, AI should:
+
+### **Create a fresh pane:**
+
+```bash
+tmux split-window -t ai-session
+```
+
+Or a fresh window:
+
+```bash
+tmux new-window -t ai-session
+```
+
+Then run the command there.
+
+---
+
+# 🟩 **Part 4 — AI Command Execution Protocol (Critical)**
+
+### **Step 1 — Create an execution window**
+
+```bash
+EXEC_WIN=$(tmux new-window -t ai-session -P -F "#{window_id}")
+```
+
+### **Step 2 — Run the actual command through tmux send-keys**
+
+```bash
+tmux send-keys -t "$EXEC_WIN" "make build" C-m
+```
+
+### **Step 3 — Monitor the job**
+
+AI should periodically query:
+
+```bash
+tmux capture-pane -t "$EXEC_WIN"
+```
+
+And:
+
+```bash
+ps -p <PID> -o pid,stat,cmd
+```
+
+---
+
+# 🟩 **Part 5 — TMUX Terminal Awareness Layer**
+
+AI uses tmux formatting variables:
+
+| Variable                  | Meaning            |
+| ------------------------- | ------------------ |
+| `#{pane_id}`              | Unique pane ID     |
+| `#{pane_pid}`             | Shell PID          |
+| `#{pane_current_command}` | Running command    |
+| `#{window_id}`            | Window identifier  |
+| `#{session_id}`           | Session identifier |
+
+Examples:
+
+### **List all panes with state**
+
+```bash
+tmux list-panes -a -F "#{session_name}:#{window_index}.#{pane_index} PID=#{pane_pid} CMD=#{pane_current_command}"
+```
+
+### **List only panes running commands**
+
+```bash
+tmux list-panes -a -F "#{pane_id} #{pane_current_command}" | grep -v "bash"
+```
+
+(A pane showing only `bash` is idle.)
+
+---
+
+# 🟩 **Part 6 — AI Never Interrupts Running Work**
+
+AI checks:
+
+### **Is the pane idle?**
+
+```bash
+[ "#{pane_current_command}" = "bash" ]
+```
+
+If **not idle**, AI does this:
+
+1. Creates a new pane/window
+2. Tracks it
+3. Executes the command there
+
+This ensures AI never:
+
+* breaks a running build
+* interrupts tests
+* kills a REPL
+* halts a background job
+
+---
+
+# 🟩 **Part 7 — AI State Tracking (This completes the system)**
+
+AI stores metadata for every pane:
+
+```
+pane_id
+window_id
+session_name
+shell_pid
+status (idle | running | long-running)
+last_command
+timestamp
+```
+
+This enables AI to:
+
+* resume jobs
+* track which pane runs what
+* detect stale/broken sessions
+* route commands to the correct location
+* avoid running in user terminals
+
+---
+
+# 🟩 **Part 8 — AI-Controlled TerminalID**
+
+This is the evolved form of your original “terminalID” idea.
+
+For tmux:
+
+```
+terminalID = session:window.pane
+```
+
+Example:
+
+```
+ai-session:2.1
+```
+
+This uniquely identifies:
+
+* which terminal
+* which window
+* which pane
+* which shell process
+
+AI can then:
+
+* query it
+* stop it
+* resume it
+* kill it
+* capture logs
+* continue execution later
+
+---
+
+# 🟩 **Part 9 — Protocol Summary**
+
+### ✔️ AI never executes commands in user terminals
+
+### ✔️ AI always uses a dedicated tmux session
+
+### ✔️ AI inspects panes/jobs before running anything
+
+### ✔️ AI creates new panes/windows when needed
+
+### ✔️ AI tracks PIDs and command state
+
+### ✔️ AI monitors long-running jobs
+
+### ✔️ AI attaches/detaches safely
+
+### ✔️ AI maintains full terminal awareness
+
+This gives you the same command orchestration capability used by:
+
+* GitHub Actions runners
+* SSH automation
+* remote DevOps agents
+* cloud build systems
+* advanced LSP-driven shells
+
+---

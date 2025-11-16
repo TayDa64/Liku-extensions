@@ -1,0 +1,409 @@
+Understood — here is **RFC-style Tier-3 Protocol: AI Terminal Orchestration and Safe Execution**.
+
+This is written in a neutral, standards-like format so it can serve as a foundation for implementation, documentation, and integration with IDEs, agents, or terminal extensions.
+
+---
+
+# **RFC-LX-007: AI-Safe Terminal Orchestration Protocol (AISTOP)**
+
+### *Tier-3 Formal Specification*
+
+**Status:** Draft
+**Author:** Liku/ChatGPT
+**Intended Audience:** AI agents, IDE integrations, terminal orchestrators, shell developers, systems engineers.
+
+---
+
+# **1. Introduction**
+
+This RFC defines a safety and orchestration protocol enabling AI agents to interact with terminal environments without interrupting, corrupting, or colliding with user processes.
+
+The protocol outlines:
+
+* terminal discovery
+* session and process-group safeguards
+* job control rules
+* execution routing
+* policies for long-running jobs
+* tmux-based virtualization layer
+* telemetry and persistent identity across windows/panes
+
+AISTOP assumes a POSIX-like environment (Linux/macOS), but the protocol is OS-portable with adapters.
+
+---
+
+# **2. Terminology**
+
+| Term                 | Definition                                                                        |
+| -------------------- | --------------------------------------------------------------------------------- |
+| **CTTY**             | Controlling terminal associated with a session.                                   |
+| **SID**              | Session ID.                                                                       |
+| **PGID**             | Process group ID. Jobs share PGIDs.                                               |
+| **TerminalID**       | Unique identifier: `<session>:<window>.<pane>` or OS TTY path.                    |
+| **AI Session**       | Trusted tmux-backed isolated environment where AI executes commands.              |
+| **User Terminal**    | Any interactive terminal session initiated by the user. Not to be modified by AI. |
+| **Execution Window** | A tmux window designated for a single command or job family.                      |
+| **Idle Pane**        | A pane whose current command equals the shell (`bash`, `zsh`, `fish`).            |
+| **Busy Pane**        | A pane running any command other than the shell.                                  |
+| **Long-running job** | A job exceeding configurable execution time threshold.                            |
+
+---
+
+# **3. Safety Principles**
+
+### **3.1 Zero Interference Principle**
+
+AI MUST NOT execute commands inside a User Terminal (any shell with a human operator).
+
+### **3.2 Terminal Isolation Principle**
+
+AI MUST execute commands only inside an AI Session unless explicitly granted a “direct mode” by the user.
+
+### **3.3 State Awareness Principle**
+
+AI MUST introspect terminal state before interacting with any terminal.
+
+### **3.4 Process Group Responsibility Principle**
+
+Signals, stops, and terminations MUST target appropriate PGIDs, not just PIDs.
+
+### **3.5 Reattachment Safety**
+
+AI MAY attach/detach from tmux sessions without altering User Terminal foreground process groups.
+
+---
+
+# **4. Terminal Discovery**
+
+AI SHALL follow this procedure to identify safe execution environments.
+
+### **4.1 Detect Current Shell Context**
+
+```bash
+TTY=$(tty)
+SHELL_PID=$$
+SID=$(ps -o sid= -p $$)
+PGID=$(ps -o pgid= -p $$)
+```
+
+### **4.2 Distinguish User Terminal vs AI Session**
+
+AI MUST consider a terminal “User Terminal” if any of the following hold:
+
+1. Session name is not `ai-session`
+2. Pane_current_command indicates active typing or interactive process
+3. Terminal is attached to a physical/virtual console owned by the user
+
+### **4.3 AI Session Creation**
+
+If no AI Session exists:
+
+```bash
+tmux new-session -d -s ai-session
+```
+
+---
+
+# **5. TerminalID Format**
+
+Each virtual execution surface MUST be uniquely identified using:
+
+```
+TerminalID = <session>:<window_index>.<pane_index>
+```
+
+Example:
+
+```
+ai-session:3.1
+```
+
+This identifier SHALL be stable and used for routing commands.
+
+---
+
+# **6. State Inspection Rules**
+
+Before executing commands, AI MUST inspect:
+
+### **6.1 Pane State**
+
+Retrieve:
+
+```
+#{pane_id}
+#{pane_pid}
+#{pane_current_command}
+#{pane_active}
+```
+
+AI MUST determine whether the pane is:
+
+* **Idle** — safe to run commands
+* **Busy** — MUST NOT run new commands there
+* **Blocked** (`STAT=D`) — MUST avoid
+* **Stopped** (`STAT=T`) — MUST warn user
+* **Zombie** (`STAT=Z`) — MUST clean up if possible
+
+### **6.2 Job Table**
+
+If in a shell environment that supports job control:
+
+```bash
+jobs -l
+```
+
+If ANY job appears in states `Running` or `Stopped`, the terminal is not safe for new commands unless in an AI Session window.
+
+---
+
+# **7. Execution Rules (Critical)**
+
+### **7.1 Safe Execution Surface**
+
+AI MUST only execute commands inside:
+
+* A new tmux window
+* Or a fresh pane within AI Session
+* Or a known idle pane in AI Session
+
+### **7.2 Window Creation**
+
+```bash
+tmux new-window -t ai-session -P -F "#{window_id}"
+```
+
+### **7.3 Command Commitment**
+
+AI SHALL send commands explicitly:
+
+```bash
+tmux send-keys -t <window_id> "<command>" C-m
+```
+
+### **7.4 Blocking vs Nonblocking Modes**
+
+#### **Blocking Mode**
+
+AI MUST monitor command output using:
+
+```bash
+tmux capture-pane -t <window_id>
+```
+
+Periodic polling SHALL detect completion.
+
+#### **Nonblocking Mode**
+
+AI MUST record:
+
+* PID
+* PGID
+* start time
+* command string
+* terminalID
+
+in internal or external metadata.
+
+---
+
+# **8. Long-Running Job Management**
+
+### **8.1 Tracking**
+
+AI SHALL track each job's:
+
+* PGID
+* PID
+* start time
+* last activity
+* terminalID
+
+### **8.2 Cancellation**
+
+AI MUST terminate entire PGID:
+
+```bash
+kill -SIGTERM -<PGID>
+```
+
+After grace period:
+
+```bash
+kill -SIGKILL -<PGID>
+```
+
+### **8.3 Detach and Survive Session Exit**
+
+AI SHOULD use:
+
+* `nohup`
+* `disown`
+* `setsid`
+
+only when working outside tmux; otherwise tmux manages session.
+
+---
+
+# **9. Foreground/Background Rules**
+
+AI SHALL NOT attempt to run interactive processes in:
+
+* Background
+* Non-interactive pane
+
+Unless user explicitly approves.
+
+AI MUST NOT manipulate the foreground PGID of user terminals using `tcsetpgrp`.
+
+AI MAY operate on foreground PGID within AI Session only.
+
+---
+
+# **10. Telemetry Specification**
+
+AI session MUST maintain:
+
+* `terminalID`
+* `pane_pid`
+* `pane_pgid`
+* `pane_sid`
+* `state` (idle/busy/blocked/stopped)
+* `last_command`
+* `errors`
+* `running_time`
+
+This metadata SHOULD persist across AI lifecycle restarts.
+
+---
+
+# **11. Error Handling**
+
+AI MUST classify errors into:
+
+### **11.1 Structural Errors**
+
+* No AI session available
+* Invalid TerminalID
+* Pane does not exist
+
+### **11.2 Process State Errors**
+
+* Busy pane
+* Stuck (`D`)
+* Stopped (`T`)
+* Zombie
+
+### **11.3 Safety Violations**
+
+* Attempt to run in user terminal
+* Attempt to send signals to wrong PGID
+* Attempt to manipulate controlling terminal
+
+AI MUST abort operations on structural and safety violations.
+
+---
+
+# **12. Security Considerations**
+
+AI MUST NOT:
+
+* intercept user keystrokes
+* modify controlling terminal state
+* attach to user panes unless explicitly allowed
+* kill or manipulate processes outside AI Session without user instruction
+* alter tmux server configuration
+* spawn untracked long-running jobs
+
+---
+
+# **13. Compliance**
+
+Implementations MUST satisfy:
+
+* sections 3, 4, 5, 6, 7 for **core compliance**
+* sections 8, 9, 10 for **advanced compliance**
+* section 12 for **security compliance**
+
+Compliant agents SHALL identify themselves as:
+
+```
+AISTOP/3.0-compliant
+```
+
+in telemetry.
+
+---
+
+# **14. Extension Mechanisms**
+
+The protocol MAY be extended with:
+
+* filesystem watchers
+* build-system adapters
+* container namespace integration
+* remote-over-SSH tmux bridging
+* agent-to-agent multiplexing
+
+Extensions SHALL follow the AISTOP namespacing convention:
+
+```
+AISTOP.ext.<name>
+```
+
+---
+
+# **15. Appendix A — Example State Machine**
+
+```
+┌──────────────┐
+│   DISCOVER   │
+└──────┬───────┘
+       │
+       ▼
+┌──────────────┐
+│  INSPECTED   │───busy──► REJECT
+└──────┬───────┘
+       │idle
+       ▼
+┌──────────────┐
+│ PREPARE WIN  │
+└──────┬───────┘
+       │
+       ▼
+┌──────────────┐
+│  EXECUTING   │───error──► TERMINATE
+└──────┬───────┘
+       │finished
+       ▼
+┌──────────────┐
+│   COMPLETE   │
+└──────────────┘
+```
+
+---
+
+# **16. Appendix B — Example YAML-like Policy**
+
+```yaml
+execution:
+  allowUserTTY: false
+  defaultSession: ai-session
+  createNewWindow: always
+  abortOnBusyPane: true
+
+signals:
+  terminatePGID: true
+  gracePeriod: 5s
+
+monitor:
+  captureInterval: 1s
+  trackPGID: true
+  trackSID: true
+
+logging:
+  storeCommandHistory: true
+  keepLast: 1000
+```
+
+---

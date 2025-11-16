@@ -1,0 +1,239 @@
+Nice — deep theory it is. I’ll explain the core POSIX process/tty concepts you need for systems-level terminal control, show the commands you’ll actually use to inspect and manipulate them, give safe practical patterns for an AI agent, and include small code/snippet examples (C and shell) where it matters. I’ll keep it practical so you can map theory → the tmux protocol you already designed.
+
+# 1 — High-level concepts (TL;DR)
+
+* **Process (PID)** — unique identifier for a running program.
+* **Process Group (PGID)** — a group of related processes (foreground/background grouping).
+* **Session (SID)** — a collection of process groups. A session has one *session leader* (a process).
+* **Controlling terminal (CTTY)** — the terminal device associated with a session. One process group is the *foreground process group* for that terminal.
+* **Job control signals** — SIGINT, SIGTSTP, SIGCONT, SIGHUP, etc. The kernel routes some signals to process groups, especially on terminal events.
+* **Orphaned process groups & SIGHUP** — when terminals close or session leaders die, background processes may receive SIGHUP unless detached properly.
+* **Daemonization / double-fork** — how to detach safely so the kernel won’t send terminal signals or leave zombies.
+
+# 2 — Process groups, sessions, and the controlling terminal (deep dive)
+
+### How they relate (short)
+
+* When you launch a shell, it becomes a **process** (PID). The shell typically is both the **session leader** and starts new **process groups** for jobs.
+* A **session** contains one or more process groups. The session leader may acquire a controlling terminal.
+* The kernel keeps track, per terminal (tty), which **process group** is the **foreground process group**. Keyboard signals (Ctrl+C, Ctrl+Z) are sent by the kernel to that entire foreground process group.
+
+### Key behaviours you must know
+
+* **Keyboard signals**: Ctrl-C → SIGINT to foreground PGID, Ctrl-Z → SIGTSTP to foreground PGID.
+* **Background processes**: processes in background PGIDs do not receive these keyboard signals.
+* **Terminal close (SIGHUP)**: when the session leader of a controlling terminal exits or the terminal is closed, processes in that session may receive SIGHUP (or be left as orphans) — so detach properly to avoid accidental termination.
+* **Signal to group**: `kill -TERM -1234` sends SIGTERM to PGID 1234 (negative number targets group).
+
+# 3 — Useful commands to inspect these entities
+
+```bash
+# PID of current shell
+echo $$
+
+# PID of last background job
+echo $!
+
+# Get PGID for a PID (gives process group id)
+ps -o pgid= -p <PID>
+
+# Get SID (session id) for a PID
+ps -o sid= -p <PID>
+
+# List processes attached to a tty (basename/pts/0 etc)
+ps -t $(basename $(tty)) -o pid,pgid,sid,tty,stat,cmd
+
+# Show process tree (helpful for parent/child relations)
+pstree -p <PID>
+
+# Show foreground process group id for the terminal
+ps -o tpgid= -t $(tty)
+
+# Send a signal to a process group (notice the minus)
+kill -SIGTERM -<PGID>
+
+# Show open file descriptors (to check resources)
+ls -l /proc/<PID>/fd
+
+# Get command currently in the pane (tmux example)
+tmux list-panes -a -F "#{session_name}:#{window_index}.#{pane_index} PID=#{pane_pid} CMD=#{pane_current_command}"
+```
+
+# 4 — Controlling the foreground/background and job control builtin tools
+
+* `jobs` — list jobs in current shell (job control).
+* `fg %[job]` — bring a job to foreground (it gets terminal).
+* `bg %[job]` — resume a job in background.
+* `disown -h %[job]` — remove job from shell’s job table and avoid SIGHUP on shell exit.
+* `nohup command &` — run command immune to SIGHUP (redirects stdout/stderr).
+* `setsid command` — start command in new session (no controlling terminal).
+* `set -m` / `set +m` — enable/disable job control in shell.
+
+# 5 — Signals and propagation (practical rules for AI agents)
+
+* Kernel sends keyboard-generated signals to the **foreground process group** only. Don’t try to send SIGINT to a single PID if the application spawns children — send to the PGID to affect the whole job.
+* To signal *a whole job*: `kill -SIGTERM -<PGID>` (negative PID).
+* If AI detaches shell or terminal incorrectly, processes may receive SIGHUP on terminal close. Use `disown`, `nohup`, `setsid`, or run them inside `tmux` to survive session logout.
+* To resume stopped jobs: `kill -SIGCONT -<PGID>`.
+
+# 6 — Zombies, wait, and reaping children
+
+* If a child process exits but the parent doesn't `wait()`, it becomes a **zombie**. Use proper reaping (`waitpid`, or make sure parent handles SIGCHLD) when writing an agent that spawns children.
+* In shell: background processes are reaped by the shell; if you daemonize (double fork) the grandchild is adopted by `init` (or systemd) and will be reaped.
+
+# 7 — Daemonize safely (double fork pattern) — C example (common pattern)
+
+When you want a process fully detached from terminal (so it won't be affected by SIGHUP or job control), use the double-fork:
+
+```c
+#include <unistd.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+void daemonize() {
+    pid_t pid = fork();
+    if (pid < 0) exit(1);
+    if (pid > 0) exit(0);    // parent exits
+
+    // child becomes session leader
+    if (setsid() < 0) exit(1);
+
+    // second fork
+    pid = fork();
+    if (pid < 0) exit(1);
+    if (pid > 0) exit(0);    // first child exits
+
+    // now in grandchild, fully detached
+    chdir("/");
+    umask(0);
+
+    // Close/redirect file descriptors if needed
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
+
+    // continue running as daemon...
+}
+```
+
+**Shell equivalent quick pattern** (useful in scripts):
+
+```bash
+# detach with nohup and disown
+nohup some_long_running_command > /var/log/mycmd.log 2>&1 &
+disown
+```
+
+Or using `setsid`:
+
+```bash
+setsid some_long_running_command >/dev/null 2>&1 < /dev/null &
+```
+
+# 8 — Controlling terminal APIs & ioctl (advanced)
+
+* The controlling terminal is a device node (e.g. `/dev/pts/2`).
+* In C you can use `ioctl(fd, TIOCGPGRP, &pgid)` and `ioctl(fd, TIOCSPGRP, &pgid)` to get/set the terminal foreground PGID (this is what shells do to put a job in the foreground).
+* `tcgetpgrp(fd)` and `tcsetpgrp(fd, pgid)` (POSIX functions) also read/set the terminal’s foreground process group.
+* Only a session leader with a controlling terminal can call `tcsetpgrp` to set a new foreground PGID for that terminal.
+
+Example: get the foreground pgrp of current tty in C:
+
+```c
+#include <unistd.h>
+#include <termios.h>
+pid_t fg = tcgetpgrp(STDIN_FILENO);
+```
+
+# 9 — Orphaned process groups & what kernel does (short)
+
+* If a process group becomes **orphaned** (no parent process in the same session to control them), the kernel may send `SIGHUP` + `SIGCONT` to members that are stopped — POSIX ensures that stopped jobs in orphaned groups are continued and receive SIGHUP so they don’t remain stopped and orphaned.
+* Practically: don’t leave stopped processes behind — use `disown` or run them in a supervised environment (`tmux`, systemd, or nohup).
+
+# 10 — Practical recommendations for your AI agent (mapped to theory)
+
+1. **Never execute in user’s CTTY.** Always operate in a managed tmux session or create a new session via `setsid` or `tmux new-session -d`. This eliminates terminal-signal coupling.
+
+   * `tmux has-session -t ai-session || tmux new -d -s ai-session`
+
+2. **Create a new PGID for long-running jobs** (either via `setsid` or by running under tmux). This isolates signals:
+
+   * `setsid my_long_cmd &`  — creates new session and PGID.
+
+3. **When sending signals, target PGID, not PID**:
+
+   * `kill -SIGTERM -$PGID`  (note the minus sign)
+
+4. **Use `disown`/`nohup` if you must start from interactive shells**, but prefer `tmux` for observability and reattachment.
+
+5. **Ensure children are reaped**: if your agent spawns processes, make sure it waits for children (handle `SIGCHLD`) or use proper daemon double-fork so `init` reaps them.
+
+6. **Use `tcgetpgrp`/`tcsetpgrp` semantics indirectly via tmux** — let tmux handle terminal foreground mechanics rather than trying to manipulate user terminals.
+
+7. **Track meta-data for each job**: PID, PGID, SID, tty, last command, start time, expected duration. Use `ps` and `tmux list-panes` to populate these fields.
+
+8. **Policy for stopped (T) or uninterruptible (D) processes**:
+
+   * If `STAT` contains `T` (stopped), prefer not to start resource-intensive jobs on that terminal; inform user.
+   * If `STAT` contains `D` (uninterruptible sleep), probably kernel blocked IO — do not interfere; investigate.
+
+# 11 — Example: safe shell wrapper for AI to launch a job (practical)
+
+```bash
+#!/usr/bin/env bash
+# ai-safe-launch.sh <label> <command...>
+label="$1"; shift
+cmd="$*"
+
+# Ensure tmux session
+tmux has-session -t ai-session 2>/dev/null || tmux new-session -d -s ai-session
+
+# Create new window named with label
+win_id=$(tmux new-window -t ai-session -P -F "#{window_id}" -n "$label")
+
+# Send the command (run in shell in that window)
+tmux send-keys -t "$win_id" "$cmd" C-m
+
+# Capture pane PID and PGID for tracking
+pane_pid=$(tmux list-panes -t "$win_id" -F "#{pane_pid}")
+pane_pgid=$(ps -o pgid= -p "$pane_pid" | tr -d ' ')
+
+echo "Launched $label window=$win_id pid=$pane_pid pgid=$pane_pgid"
+```
+
+This approach:
+
+* Leaves the user terminal untouched.
+* Gives the job its own PGID (inside tmux).
+* Lets AI monitor via `ps`/`tmux capture-pane`.
+
+# 12 — Example: sending a signal to a job safely
+
+```bash
+# kill job by PGID (negative)
+pgid=12345
+kill -SIGTERM -$pgid   # polite
+sleep 5
+kill -SIGKILL -$pgid   # force if needed
+```
+
+# 13 — Quick cheat sheet / commands you’ll use repeatedly
+
+* `ps -o pid,ppid,pgid,sid,tty,stat,cmd -p <PID>`
+* `ps -t $(basename $(tty)) -o pid,pgid,stat,cmd`
+* `ps -o tpgid= -t $(tty)`  (foreground pgrp on terminal)
+* `kill -SIGTERM -<PGID>`
+* `setsid <cmd>`
+* `nohup <cmd> &`  + `disown`
+* `tmux new -s ai-session -d` / `tmux new-window` / `tmux send-keys`
+* `tcgetpgrp(0)` / `tcsetpgrp(fd, pgid)` in C for advanced control
+
+# 14 — Final notes & gotchas
+
+* **macOS differences:** some low-level ioctl/terminal behavior differs slightly; prefer tmux for cross-platform robustness.
+* **Systemd:** on many modern systems, long-running services are better handled by systemd service units than by orphaned daemons — consider supervising with systemd for production.
+* **Security:** never let an agent run arbitrary commands without policy checks; a detached job that persists may leak credentials or hold resources.
+
+---

@@ -1,0 +1,194 @@
+name: YOLO Supervisor
+
+on:
+  workflow_dispatch:
+    inputs:
+      rerun_failed:
+        description: 'Re-run failed workflow runs (true/false)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['true', 'false']
+      pr_label:
+        description: 'PR label to monitor (e.g., yolo)'
+        required: false
+        default: 'yolo'
+  workflow_run:
+    workflows:
+      - 'check formatting'
+      - 'lint js'
+      - 'lint rust'
+      - 'CI (Selective Electron)'
+    types: [completed]
+
+permissions:
+  actions: write
+  checks: read
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  supervise:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Monitor workflows and PRs
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const rerunFailed = (core.getInput('rerun_failed') || 'false') === 'true';
+            const prLabel = core.getInput('pr_label') || 'yolo';
+            const eventName = context.eventName;
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const summary = [];
+
+            async function ensureLabel(name, color) {
+              try { await github.rest.issues.getLabel({ owner, repo, name }); }
+              catch { try { await github.rest.issues.createLabel({ owner, repo, name, color }); } catch(e){} }
+            }
+            function extractIssueNumbers(text) {
+              const numbers = new Set();
+              const re = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|ref(?:erence[sd]?)?)\s*[:#]*\s*#(\d+)/ig;
+              let m;
+              while ((m = re.exec(text))) numbers.add(parseInt(m[1], 10));
+              const bare = /#(\d+)/g;
+              while ((m = bare.exec(text))) numbers.add(parseInt(m[1], 10));
+              return Array.from(numbers);
+            }
+
+            if (eventName === 'workflow_run') {
+              const wr = context.payload.workflow_run;
+              const name = wr.name;
+              const runId = wr.id;
+              const conclusion = wr.conclusion;
+              const attempt = wr.run_attempt || 1;
+              summary.push(`workflow_run: ${name} id=${runId} conclusion=${conclusion} attempt=${attempt}`);
+
+              let rerunRequested = false;
+              if (conclusion === 'failure' && attempt === 1) {
+                try {
+                  await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun', { owner, repo, run_id: runId });
+                  rerunRequested = true;
+                  summary.push(`Auto-rerun requested for run ${runId}`);
+                } catch (e) {
+                  summary.push(`Auto-rerun request failed for run ${runId}: ${e.message}`);
+                }
+              }
+
+              try {
+                const sha = wr.head_sha;
+                const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({ owner, repo, commit_sha: sha });
+                await ensureLabel('needs-investigation', 'b60205');
+                for (const pr of prs) {
+                  const number = pr.number;
+                  const labels = (pr.labels || []).map(l => l.name);
+                  if (!labels.includes('needs-investigation')) {
+                    await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: ['needs-investigation'] });
+                  }
+                  const guidance = [
+                    `Detected failed workflow: ${name}.` + (rerunRequested ? ' A one-time auto-rerun has been triggered.' : ''),
+                    '',
+                    'Next steps:',
+                    '- Open the failed job logs and identify the first failure; paste the exact error if unclear.',
+                    '- Ensure PR template fields are complete (Linked issue, Model used, Test Plan, Checklist).',
+                    '- Reproduce locally; include commands and environment details.',
+                    '- Address lint/type errors first; then tests; then build/runtime issues.',
+                  ].join('\n');
+                  await github.rest.issues.createComment({ owner, repo, issue_number: number, body: guidance });
+
+                  const linked = extractIssueNumbers(pr.body || '');
+                  for (const issue_number of linked) {
+                    try {
+                      await github.rest.issues.addLabels({ owner, repo, issue_number, labels: ['needs-investigation'] });
+                      await github.rest.issues.createComment({ owner, repo, issue_number, body: `PR #${number} has a failing workflow: ${name}.` + (rerunRequested ? ' Auto-rerun triggered.' : '') });
+                    } catch (e) {}
+                  }
+                }
+              } catch (e) {
+                summary.push(`Association error for run ${runId}: ${e.message}`);
+              }
+
+              core.summary.addHeading('YOLO Supervisor Summary');
+              summary.forEach(s => core.summary.addRaw(`- ${s}\n`));
+              await core.summary.write();
+              return;
+            }
+
+            const targetWorkflows = ['YOLO Open Issues', 'YOLO Guidance Comment', 'PR Guard', 'check formatting', 'lint js', 'lint rust', 'CI (Selective Electron)'];
+            const { data: wfList } = await github.rest.actions.listRepoWorkflows({ owner, repo, per_page: 100 });
+            const wfMap = new Map();
+            for (const wf of wfList.workflows) wfMap.set(wf.name, wf);
+
+            for (const name of targetWorkflows) {
+              const wf = wfMap.get(name);
+              if (!wf) { summary.push(`Workflow not found: ${name}`); continue; }
+              const { data: runs } = await github.rest.actions.listWorkflowRuns({ owner, repo, workflow_id: wf.id, per_page: 20 });
+              const byConclusion = runs.workflow_runs.reduce((acc, r) => {
+                const c = r.conclusion || r.status || 'unknown';
+                acc[c] = (acc[c] || 1) + 1; return acc;
+              }, {});
+              summary.push(`${name}: ${JSON.stringify(byConclusion)}`);
+
+              if (rerunFailed) {
+                for (const r of runs.workflow_runs) {
+                  if (r.conclusion === 'failure') {
+                    try {
+                      await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun', { owner, repo, run_id: r.id });
+                      summary.push(`Re-ran failed run ${r.id} for ${name}`);
+                    } catch (e) {
+                      summary.push(`Could not rerun ${r.id} for ${name}: ${e.message}`);
+                    }
+                  }
+                }
+              }
+            }
+
+            await ensureLabel('ready-for-review', '0e8a16');
+
+            const q = `repo:${owner}/${repo} is:pr is:open label:${prLabel}`;
+            const { data: search } = await github.rest.search.issuesAndPullRequests({ q, per_page: 50 });
+            for (const item of search.items) {
+              const number = item.number;
+              const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+              const sha = pr.head.sha;
+              const checks = await github.rest.checks.listForRef({ owner, repo, ref: sha, per_page: 100 });
+              const conclusions = checks.data.check_runs.map(c => c.conclusion).filter(Boolean);
+              const hasFailures = conclusions.includes('failure') || conclusions.includes('timed_out') || conclusions.includes('cancelled');
+              const allSuccess = conclusions.length > 0 && conclusions.every(c => c === 'success' || c === 'skipped' || c === 'neutral');
+
+              if (hasFailures) {
+                const msg = [
+                  'PR status: checks failing. Please ensure:',
+                  '- PR template fields are complete (linked issue, Model used, Test Plan, Checklist).',
+                  '- Unit/integration tests pass. See workflow run logs for errors.',
+                ].join('\n');
+                await github.rest.issues.createComment({ owner, repo, issue_number: number, body: msg });
+              } else if (allSuccess && pr.mergeable_state !== 'dirty') {
+                const labels = (pr.labels || []).map(l => l.name);
+                if (!labels.includes('ready-for-review')) {
+                  await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: ['ready-for-review'] });
+                }
+                if (pr.draft) {
+                  try {
+                    await github.rest.pulls.update({ owner, repo, pull_number: number, draft: false });
+                    await github.rest.issues.createComment({ owner, repo, issue_number: number, body: 'All checks green — marking as Ready for review.' });
+                  } catch (e) {}
+                }
+                if (labels.includes('automerge')) {
+                  try {
+                    await github.rest.pulls.merge({ owner, repo, pull_number: number, merge_method: 'squash' });
+                    await github.rest.issues.createComment({ owner, repo, issue_number: number, body: 'Auto-merged (squash) as all checks passed and label `automerge` is set.' });
+                  } catch (e) {
+                    await github.rest.issues.createComment({ owner, repo, issue_number: number, body: `Automerge attempt failed: ${e.message}` });
+                  }
+                }
+              }
+            }
+
+            core.summary.addHeading('YOLO Supervisor Summary');
+            summary.forEach(s => core.summary.addRaw(`- ${s}\n`));
+            await core.summary.write();
