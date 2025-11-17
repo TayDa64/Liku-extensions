@@ -10,11 +10,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
-# Add parent directory to path for imports
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / "core"))
-
-from state_backend import StateBackend
+from liku.state_backend import StateBackend
 
 
 class StateBackendTests(unittest.TestCase):
@@ -59,53 +55,59 @@ class StateBackendTests(unittest.TestCase):
         conn.close()
     
     def test_start_session(self):
-        """Test starting an agent session."""
-        session_key = self.backend.start_session(
+        """Test creating an agent session."""
+        # create_agent_session requires session_key parameter
+        session_key = "test-agent-12345"
+        session_id = self.backend.create_agent_session(
             agent_name="test-agent",
-            pane_id="%1",
-            config={"key": "value"}
+            session_key=session_key,
+            terminal_id="%1",
+            mode="interactive"
         )
         
-        self.assertIsNotNone(session_key)
-        self.assertTrue(session_key.startswith("test-agent-"))
+        self.assertIsNotNone(session_id)
+        self.assertIsInstance(session_id, int)
         
         # Verify session was recorded
-        sessions = self.backend.get_sessions()
+        sessions = self.backend.list_agent_sessions()
         self.assertEqual(len(sessions), 1)
         self.assertEqual(sessions[0]["agent_name"], "test-agent")
-        self.assertEqual(sessions[0]["pane_id"], "%1")
+        self.assertEqual(sessions[0]["terminal_id"], "%1")
     
     def test_end_session(self):
         """Test ending an agent session."""
-        session_key = self.backend.start_session("test-agent")
+        session_key = "test-agent-12345"
+        self.backend.create_agent_session("test-agent", session_key)
         
-        # End session
-        self.backend.end_session(session_key, exit_code=0)
+        # Update session status
+        self.backend.update_agent_status("test-agent", session_key, "completed")
         
-        # Verify session is marked as ended
-        sessions = self.backend.get_sessions()
-        self.assertEqual(len(sessions), 1)
-        self.assertIsNotNone(sessions[0]["ended_at"])
-        self.assertEqual(sessions[0]["exit_code"], 0)
+        # Verify session status was updated
+        session = self.backend.get_agent_session("test-agent", session_key)
+        self.assertIsNotNone(session)
+        self.assertEqual(session["status"], "completed")
     
     def test_get_active_sessions(self):
         """Test getting only active sessions."""
-        # Start two sessions
-        session1 = self.backend.start_session("agent1")
-        session2 = self.backend.start_session("agent2")
+        # Create two sessions
+        session1 = "agent1-12345"
+        session2 = "agent2-67890"
+        self.backend.create_agent_session("agent1", session1)
+        self.backend.create_agent_session("agent2", session2)
         
-        # End one session
-        self.backend.end_session(session1, exit_code=0)
+        # Mark one as completed
+        self.backend.update_agent_status("agent1", session1, "completed")
         
-        # Get active sessions
-        active = self.backend.get_sessions(active_only=True)
+        # Get active sessions (status='active')
+        active = self.backend.list_agent_sessions(status="active")
         
         self.assertEqual(len(active), 1)
         self.assertEqual(active[0]["session_key"], session2)
     
     def test_log_event(self):
         """Test logging an event."""
-        session_key = self.backend.start_session("test-agent")
+        session_key = "test-agent-12345"
+        self.backend.create_agent_session("test-agent", session_key)
         
         event_id = self.backend.log_event(
             event_type="agent.spawn",
@@ -119,12 +121,13 @@ class StateBackendTests(unittest.TestCase):
         # Verify event was recorded
         events = self.backend.get_events(limit=1)
         self.assertEqual(len(events), 1)
-        self.assertEqual(events[0]["type"], "agent.spawn")
+        self.assertEqual(events[0]["event_type"], "agent.spawn")
         self.assertEqual(events[0]["payload"]["agent"], "test-agent")
     
     def test_get_events_with_filter(self):
         """Test filtering events by type."""
-        session_key = self.backend.start_session("test-agent")
+        session_key = "test-agent-12345"
+        self.backend.create_agent_session("test-agent", session_key)
         
         # Log multiple event types
         self.backend.log_event("agent.spawn", {"num": 1}, session_key)
@@ -135,50 +138,53 @@ class StateBackendTests(unittest.TestCase):
         spawn_events = self.backend.get_events(event_type="agent.spawn")
         
         self.assertEqual(len(spawn_events), 2)
-        self.assertTrue(all(e["type"] == "agent.spawn" for e in spawn_events))
+        self.assertTrue(all(e["event_type"] == "agent.spawn" for e in spawn_events))
     
     def test_get_events_with_limit(self):
         """Test limiting number of events returned."""
-        session_key = self.backend.start_session("test-agent")
+        session_key = "test-agent-12345"
+        self.backend.create_agent_session("test-agent", session_key)
         
         # Log many events
-        for i in range(10):
-            self.backend.log_event(f"test.event{i}", {"num": i}, session_key)
+        for i in range(20):
+            self.backend.log_event("test.event", {"num": i}, session_key)
         
-        # Get limited results
+        # Get limited events
         events = self.backend.get_events(limit=5)
         
         self.assertEqual(len(events), 5)
     
     def test_register_pane(self):
-        """Test registering a tmux pane."""
-        session_key = self.backend.start_session("test-agent", pane_id="%1")
+        """Test recording a tmux pane."""
+        session_key = "test-agent-12345"
+        self.backend.create_agent_session("test-agent", session_key, terminal_id="%1")
         
-        self.backend.register_pane(
-            pane_id="%1",
-            session_name="test-session",
-            agent_name="test-agent",
-            session_key=session_key
+        pane_id = self.backend.record_pane(
+            session_key=session_key,
+            terminal_id="%1",
+            pane_pid=1234,
+            status="active"
         )
         
-        # Verify pane was registered
-        panes = self.backend.get_panes()
+        # Verify pane was recorded
+        panes = self.backend.list_panes()
         self.assertEqual(len(panes), 1)
-        self.assertEqual(panes[0]["pane_id"], "%1")
-        self.assertEqual(panes[0]["session_name"], "test-session")
+        self.assertEqual(panes[0]["terminal_id"], "%1")
+        self.assertEqual(panes[0]["session_key"], session_key)
     
     def test_unregister_pane(self):
-        """Test unregistering a tmux pane."""
-        session_key = self.backend.start_session("test-agent", pane_id="%1")
-        self.backend.register_pane("%1", "test-session", "test-agent", session_key)
+        """Test marking a pane as closed."""
+        session_key = "test-agent-12345"
+        self.backend.create_agent_session("test-agent", session_key, terminal_id="%1")
+        self.backend.record_pane(session_key, "%1", pane_pid=1234, status="active")
         
-        # Unregister pane
-        self.backend.unregister_pane("%1")
+        # Mark as closed
+        self.backend.record_pane(session_key, "%1", pane_pid=1234, status="closed")
         
-        # Verify pane is marked as inactive
-        panes = self.backend.get_panes()
-        self.assertEqual(len(panes), 1)
-        self.assertIsNotNone(panes[0]["unregistered_at"])
+        # Verify pane status updated
+        pane = self.backend.get_pane("%1")
+        self.assertIsNotNone(pane)
+        self.assertEqual(pane["status"], "closed")
     
     def test_set_approval_mode(self):
         """Test setting approval mode for an agent."""
@@ -195,29 +201,69 @@ class StateBackendTests(unittest.TestCase):
     
     def test_create_guidance(self):
         """Test creating a guidance record."""
-        session_key = self.backend.start_session("test-agent")
+        session_key = "test-agent-12345"
+        self.backend.create_agent_session("test-agent", session_key)
         
-        guidance_id = self.backend.create_guidance(
+        guidance_id = self.backend.add_guidance(
             agent_name="test-agent",
             session_key=session_key,
-            prompt="Test prompt",
-            response="Test response"
+            instructions="Test prompt",
+            context="Test context"
         )
         
         self.assertIsNotNone(guidance_id)
         
         # Verify guidance was recorded
-        guidances = self.backend.get_guidances(agent_name="test-agent")
+        guidances = self.backend.get_guidance(agent_name="test-agent")
         self.assertEqual(len(guidances), 1)
-        self.assertEqual(guidances[0]["prompt"], "Test prompt")
-        self.assertEqual(guidances[0]["response"], "Test response")
+        self.assertEqual(guidances[0]["instructions"], "Test prompt")
+        self.assertEqual(guidances[0]["context"], "Test context")
+
+    def test_get_agent_session_by_pane_id(self):
+        """Test getting an agent session by its pane ID (terminal_id)."""
+        active_session_key = "test-agent-by-pane-123"
+        active_terminal_id = "%99"
+        inactive_session_key = "inactive-session"
+        inactive_terminal_id = "%100"
+        
+        # Create an active session associated with a terminal_id
+        self.backend.create_agent_session(
+            agent_name="pane-agent",
+            session_key=active_session_key,
+            terminal_id=active_terminal_id
+        )
+        
+        # Create another session that will be marked as inactive
+        self.backend.create_agent_session(
+            agent_name="inactive-agent",
+            session_key=inactive_session_key,
+            terminal_id=inactive_terminal_id
+        )
+        # Mark the second session as completed
+        self.backend.update_agent_status("inactive-agent", inactive_session_key, "completed")
+
+        # Retrieve the session by pane ID
+        session = self.backend.get_agent_session_by_pane_id(active_terminal_id)
+        
+        self.assertIsNotNone(session)
+        self.assertEqual(session["agent_name"], "pane-agent")
+        self.assertEqual(session["session_key"], active_session_key)
+        
+        # Test that a non-existent pane_id returns None
+        non_existent = self.backend.get_agent_session_by_pane_id("%-1")
+        self.assertIsNone(non_existent)
+        
+        # Test that an inactive pane_id returns None
+        inactive = self.backend.get_agent_session_by_pane_id(inactive_terminal_id)
+        self.assertIsNone(inactive)
     
     def test_thread_safety(self):
         """Test thread-safe operations."""
         import threading
         
         def create_session(agent_num):
-            session_key = self.backend.start_session(f"agent-{agent_num}")
+            session_key = f"agent-{agent_num}-12345"
+            self.backend.create_agent_session(f"agent-{agent_num}", session_key)
             self.backend.log_event("test.event", {"num": agent_num}, session_key)
         
         # Create multiple threads
@@ -232,7 +278,7 @@ class StateBackendTests(unittest.TestCase):
             thread.join()
         
         # Verify all sessions and events were recorded
-        sessions = self.backend.get_sessions()
+        sessions = self.backend.list_agent_sessions()
         events = self.backend.get_events()
         
         self.assertEqual(len(sessions), 10)

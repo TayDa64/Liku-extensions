@@ -1,0 +1,22 @@
+{
+    "name": "joke-agent",
+    "description": "A conversational agent that tells jokes and elicits responses.",
+    "version": "1.0.0",
+    "author": "Gemini",
+    "entrypoint": "joke_agent.py",
+    "events": {
+        "listens": [
+            "user.message"
+        ],
+        "emits": [
+            "agent.message"
+        ]
+    },
+    "policies": {
+        "sandbox_mode": "docker",
+        "image": "python:3.9",
+        "allowed_commands": [
+            "echo"
+        ]
+    }
+}

@@ -12,16 +12,11 @@ from typing import Generator
 
 import pytest
 
-# Add core directory to path for imports
-core_dir = Path(__file__).parent.parent / "core"
-if str(core_dir) not in sys.path:
-    sys.path.insert(0, str(core_dir))
-
-from event_bus import EventBus
-from state_backend import StateBackend
-from tmux_manager import TmuxManager
-from liku_client import LikuClient
-from liku_daemon import LikuDaemon
+from liku.event_bus import EventBus
+from liku.state_backend import StateBackend
+from liku.tmux_manager import TmuxManager
+from liku.liku_client import LikuClient
+from liku.liku_daemon import LikuDaemon
 
 
 @pytest.fixture

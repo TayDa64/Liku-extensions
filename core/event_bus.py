@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, Optional
 
-from state_backend import StateBackend
+from liku.state_backend import StateBackend
 
 
 class EventBus:

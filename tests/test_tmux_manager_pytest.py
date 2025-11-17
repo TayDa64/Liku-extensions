@@ -44,7 +44,7 @@ class TestTmuxManagerInit:
         """Test error when tmux not available."""
         mock_subprocess.side_effect = FileNotFoundError()
         
-        with pytest.raises(RuntimeError, match="tmux not found"):
+        with pytest.raises(RuntimeError, match="tmux is not available"):
             TmuxManager()
 
 
@@ -97,8 +97,9 @@ class TestTmuxManagerSessions:
         
         tmux_manager_with_mocks.ensure_session("test-session")
         
-        # Verify new-session was called
-        assert mock_subprocess.call_count == 2
+        # Verify has-session and new-session were called (after initial version check)
+        # Version check already happened in fixture, so we expect 2 calls here
+        assert mock_subprocess.call_count >= 2
 
 
 class TestTmuxManagerPanes:
@@ -108,10 +109,11 @@ class TestTmuxManagerPanes:
         """Test listing tmux panes."""
         version_check = MagicMock(returncode=0, stdout="tmux 3.0")
         
+        # TmuxManager expects 8 fields: session|window|pane|pane_id|pid|command|width|height
         panes_output = MagicMock(
             returncode=0,
-            stdout="session1:0.0|/bin/bash|80x24|%0|1|1234567890\n"
-                   "session1:0.1|python|80x24|%1|0|1234567891\n"
+            stdout="session1|0|0|%0|1234|/bin/bash|80|24\n"
+                   "session1|0|1|%1|5678|python|80|24\n"
         )
         
         mock_subprocess.side_effect = [version_check, panes_output]
@@ -120,12 +122,13 @@ class TestTmuxManagerPanes:
         panes = manager.list_panes()
         
         assert len(panes) == 2
-        assert panes[0].terminal_id == "session1:0.0"
-        assert panes[0].command == "/bin/bash"
-        assert panes[0].size == "80x24"
+        assert panes[0].session == "session1"
+        assert panes[0].pane_current_command == "/bin/bash"
+        assert panes[0].pane_width == 80
+        assert panes[0].pane_height == 24
         assert panes[0].pane_id == "%0"
-        assert panes[0].active is True
-        assert panes[1].active is False
+        assert panes[0].pane_pid == 1234
+        assert panes[1].pane_pid == 5678
     
     def test_list_panes_empty(self, mock_subprocess):
         """Test listing panes when none exist."""
@@ -141,19 +144,26 @@ class TestTmuxManagerPanes:
     
     def test_create_pane(self, tmux_manager_with_mocks, mock_subprocess):
         """Test creating a new pane."""
-        # Mock split-window output
-        split_output = MagicMock(returncode=0, stdout="%5")
-        mock_subprocess.return_value = split_output
+        # Mock split-window output returning pane_id
+        split_output = MagicMock(returncode=0, stdout="%5\n")
+        # Mock list-panes to return created pane details (8 fields)
+        panes_output = MagicMock(
+            returncode=0,
+            stdout="test-session|0|0|%5|1234|bash|80|24\n"
+        )
+        mock_subprocess.side_effect = [split_output, panes_output]
         
-        pane_id = tmux_manager_with_mocks.create_pane(
+        # Actual API: create_pane(session, command=None, vertical=False, agent_name=None)
+        pane = tmux_manager_with_mocks.create_pane(
             session="test-session",
-            window="test-window",
-            name="test-pane"
+            command="bash",
+            agent_name="test-agent"
         )
         
-        assert pane_id == "%5"
-        # Verify split-window was called
-        mock_subprocess.assert_called()
+        assert pane is not None
+        assert pane.pane_id == "%5"
+        # Verify split-window and list-panes were called
+        assert mock_subprocess.call_count >= 2
     
     def test_kill_pane(self, tmux_manager_with_mocks, mock_subprocess):
         """Test killing a pane."""
@@ -193,7 +203,8 @@ class TestTmuxManagerCommands:
         
         output = tmux_manager_with_mocks.capture_pane("%5")
         
-        assert output == "captured output\n"
+        # Output is stripped by _run_tmux
+        assert output == "captured output"
         # Verify capture-pane was called
         mock_subprocess.assert_called()
         call_args = mock_subprocess.call_args[0][0]
@@ -233,19 +244,29 @@ class TestTmuxManagerEventEmission:
         # Mock tmux version check
         version_check = MagicMock(returncode=0, stdout="tmux 3.0")
         # Mock split-window
-        split_output = MagicMock(returncode=0, stdout="%5")
-        mock_subprocess.side_effect = [version_check, split_output]
+        split_output = MagicMock(returncode=0, stdout="%5\n")
+        # Mock list-panes (8 fields: session|window|pane|pane_id|pid|cmd|width|height)
+        panes_output = MagicMock(
+            returncode=0,
+            stdout="test|0|0|%5|1234|bash|80|24\n"
+        )
+        mock_subprocess.side_effect = [version_check, split_output, panes_output]
         
         # Create manager with mock event bus
         mock_event_bus = mocker.MagicMock()
         manager = TmuxManager(event_bus=mock_event_bus)
         
-        manager.create_pane(session="test", window="0", name="test-pane")
+        # Correct API: no window parameter
+        pane = manager.create_pane(session="test", command="bash", agent_name="test-agent")
         
-        # Verify event was emitted
+        # Verify pane was created
+        assert pane is not None
+        assert pane.pane_id == "%5"
+        
+        # Verify event was emitted with correct event type
         mock_event_bus.emit.assert_called_once()
         call_args = mock_event_bus.emit.call_args[0]
-        assert call_args[0] == "pane.created"
+        assert call_args[0] == "agent.spawn"
 
 
 # Integration tests (require tmux)

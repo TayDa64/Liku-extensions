@@ -10,7 +10,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from event_bus import EventBus
+from liku.event_bus import EventBus
 
 
 @dataclass

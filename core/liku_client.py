@@ -16,88 +16,94 @@ DEFAULT_TCP_PORT = 13337
 
 
 class LikuClient:
-    """
-    Client for communicating with LIKU daemon.
-    """
-    
+    """Client for interacting with the LIKU daemon."""
+
     def __init__(
         self,
         socket_path: Optional[str] = None,
+        tcp_host: Optional[str] = None,
         tcp_port: Optional[int] = None,
-        tcp_host: str = "127.0.0.1",
-        use_tcp: bool = None
+        timeout: int = 10
     ):
         """
         Initialize the LIKU client.
         
         Args:
-            socket_path: Path to daemon UNIX socket (default: ~/.liku/liku.sock) - Unix only
-            tcp_port: TCP port for daemon connection (default: 13337) - cross-platform
-            tcp_host: TCP host address (default: 127.0.0.1)
-            use_tcp: Force TCP mode even on Unix platforms (default: auto-detect)
+            socket_path: Path to UNIX socket (for Unix-like systems)
+            tcp_host: Host for TCP connection (e.g., '127.0.0.1')
+            tcp_port: Port for TCP connection
+            timeout: Socket timeout in seconds
         """
-        home = Path.home()
+        self.timeout = timeout
         
-        # Determine communication mode
-        if use_tcp is None:
-            # Auto-detect: use TCP on Windows, UNIX sockets on Unix
-            self.use_tcp = not SUPPORTS_UNIX_SOCKETS
-        else:
-            self.use_tcp = use_tcp
-        
-        # Setup communication endpoint
-        if self.use_tcp:
-            self.tcp_port = tcp_port or DEFAULT_TCP_PORT
+        # Determine connection mode
+        if tcp_host and tcp_port:
+            self.use_tcp = True
             self.tcp_host = tcp_host
+            self.tcp_port = tcp_port
             self.socket_path = None
-        else:
-            self.socket_path = socket_path or str(home / ".liku" / "liku.sock")
-            self.tcp_port = None
+        elif socket_path:
+            self.use_tcp = False
+            self.socket_path = socket_path
             self.tcp_host = None
-    
+            self.tcp_port = None
+        else:
+            # Auto-detect default
+            if SUPPORTS_UNIX_SOCKETS:
+                self.use_tcp = False
+                self.socket_path = str(Path.home() / ".liku" / "liku.sock")
+            else:
+                self.use_tcp = True
+                self.tcp_host = "127.0.0.1"
+                self.tcp_port = 13337
+
+    def _get_socket(self) -> socket.socket:
+        """Create and connect a socket based on the configured mode."""
+        if self.use_tcp:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(self.timeout)
+            sock.connect((self.tcp_host, self.tcp_port))
+        else:
+            if not self.socket_path or not Path(self.socket_path).exists():
+                raise ConnectionError(f"UNIX socket not found at {self.socket_path}")
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.settimeout(self.timeout)
+            sock.connect(self.socket_path)
+        return sock
+
     def _send_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Send a request to the daemon.
+        Send a request to the daemon and get the response.
         
         Args:
             request: Request dictionary
             
         Returns:
             Response dictionary
-            
-        Raises:
-            ConnectionError: If daemon is not running
-            RuntimeError: If daemon returns an error
         """
         try:
-            # Connect to daemon
-            if self.use_tcp:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.connect((self.tcp_host, self.tcp_port))
-            else:
-                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                sock.connect(self.socket_path)
-            
-            # Send request
-            sock.sendall(json.dumps(request).encode())
-            
-            # Receive response
-            data = sock.recv(4096)
-            response = json.loads(data.decode())
-            
-            sock.close()
-            
-            # Check for errors
-            if response.get("status") == "error":
-                raise RuntimeError(response.get("error", "Unknown error"))
-            
-            return response
+            with self._get_socket() as sock:
+                sock.sendall(json.dumps(request).encode())
+                
+                # Receive response
+                response_data = sock.recv(8192)
+                if not response_data:
+                    raise ConnectionError("Daemon closed the connection without a response.")
+                
+                response = json.loads(response_data.decode())
+                
+                if response.get("status") == "error":
+                    raise RuntimeError(f"Daemon error: {response.get('error', 'Unknown error')}")
+                
+                return response
         
-        except (FileNotFoundError, ConnectionRefusedError):
-            raise ConnectionError(
-                f"Cannot connect to LIKU daemon at {self.socket_path}. "
-                "Is the daemon running? Start it with: liku_daemon.py"
-            )
+        except (ConnectionRefusedError, FileNotFoundError):
+            endpoint = f"{self.tcp_host}:{self.tcp_port}" if self.use_tcp else self.socket_path
+            raise ConnectionError(f"Could not connect to LIKU daemon at {endpoint}. Is it running?")
+        except json.JSONDecodeError:
+            raise ValueError("Failed to decode JSON response from daemon.")
+        except Exception as e:
+            raise e
     
     # Event bus operations
     

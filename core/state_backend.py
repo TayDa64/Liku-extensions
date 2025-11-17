@@ -229,6 +229,17 @@ class StateBackend:
         
         row = cursor.fetchone()
         return dict(row) if row else None
+
+    def get_agent_session_by_pane_id(self, pane_id: str) -> Optional[Dict[str, Any]]:
+        """Get active agent session by pane ID (terminal_id)."""
+        conn = self._get_connection()
+        cursor = conn.execute("""
+            SELECT * FROM agent_session 
+            WHERE terminal_id = ? AND status = 'active'
+        """, (pane_id,))
+        
+        row = cursor.fetchone()
+        return dict(row) if row else None
     
     def list_agent_sessions(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
         """List all agent sessions, optionally filtered by status."""

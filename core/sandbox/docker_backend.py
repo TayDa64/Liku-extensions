@@ -1,6 +1,7 @@
 import docker
 from docker.models.containers import Container
 from docker.errors import ImageNotFound, NotFound
+from pathlib import Path # Added import
 from liku.sandbox.base import Sandbox, SandboxResource
 from typing import Dict, Any, Optional
 import logging
@@ -43,6 +44,9 @@ class DockerSandbox(Sandbox):
             raise
 
         try:
+            # Get the project root dynamically
+            project_root = Path(__file__).parent.parent.parent
+            
             container = self.client.containers.run(
                 image,
                 command=command,
@@ -50,13 +54,10 @@ class DockerSandbox(Sandbox):
                 detach=True,
                 tty=True,  # Allocate a pseudo-TTY for interactive processes
                 stdin_open=True, # Keep stdin open
-                # Add more container options based on config (e.g., volumes, environment, network)
-                # volumes={
-                #     '/host/path': {'bind': '/container/path', 'mode': 'rw'}
-                # },
-                # environment={
-                #     'MY_ENV_VAR': 'value'
-                # }
+                volumes={
+                    str(project_root): {'bind': '/app', 'mode': 'ro'}
+                },
+                working_dir='/app' # Set working directory inside container
             )
             logger.info(f"Docker container '{container.id}' created for agent '{agent_name}' (session: {session_key})")
             return SandboxResource(id=container.id, pid=container.top()['Processes'][0][1] if container.top()['Processes'] else None)

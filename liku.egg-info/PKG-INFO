@@ -24,6 +24,8 @@ Classifier: Topic :: Software Development :: Libraries :: Python Modules
 Requires-Python: >=3.9
 Description-Content-Type: text/markdown
 Requires-Dist: psutil>=5.9.0
+Requires-Dist: PyYAML>=6.0
+Requires-Dist: docker>=7.0.0
 Provides-Extra: dev
 Requires-Dist: pytest>=7.4.0; extra == "dev"
 Requires-Dist: pytest-cov>=4.1.0; extra == "dev"

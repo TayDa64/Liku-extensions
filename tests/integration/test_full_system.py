@@ -12,6 +12,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+import socket
 
 # Add parent directory to path for imports
 import sys
@@ -33,7 +34,6 @@ class LikuTestHarness:
             test_dir: Temporary directory for test artifacts
         """
         self.test_dir = Path(test_dir)
-        self.socket_path = self.test_dir / "liku.sock"
         self.db_path = self.test_dir / "liku.db"
         self.events_dir = self.test_dir / "events"
         self.events_dir.mkdir(exist_ok=True)
@@ -42,13 +42,32 @@ class LikuTestHarness:
         self.client = None
         self.db = None
         self.event_bus = None
-    
+
+        # Platform-aware communication setup
+        self.use_tcp = not hasattr(socket, 'AF_UNIX')
+        if self.use_tcp:
+            self.tcp_host = "127.0.0.1"
+            self.tcp_port = 13337
+            self.socket_path = None
+        else:
+            self.socket_path = self.test_dir / "liku.sock"
+            self.tcp_port = None
+            self.tcp_host = None
+
     def start(self):
         """Start the LIKU daemon in test mode."""
-        # Start daemon in subprocess
         daemon_script = Path(__file__).parent.parent.parent / "core" / "liku_daemon.py"
         
         env = os.environ.copy()
+        # Pass test-specific paths to the daemon
+        env["LIKU_DB_PATH"] = str(self.db_path)
+        env["LIKU_EVENTS_DIR"] = str(self.events_dir)
+        if self.use_tcp:
+            env["LIKU_USE_TCP"] = "1"
+            env["LIKU_TCP_PORT"] = str(self.tcp_port)
+        else:
+            env["LIKU_SOCKET_PATH"] = str(self.socket_path)
+
         self.daemon_process = subprocess.Popen(
             [sys.executable, str(daemon_script)],
             env=env,
@@ -57,33 +76,71 @@ class LikuTestHarness:
             cwd=str(self.test_dir)
         )
         
-        # Wait for daemon to start (check for socket file)
+        # Wait for daemon to start
+        self._wait_for_daemon()
+        
+        # Initialize client and other components
+        if self.use_tcp:
+            self.client = LikuClient(tcp_host=self.tcp_host, tcp_port=self.tcp_port)
+        else:
+            self.client = LikuClient(socket_path=str(self.socket_path))
+            
+        self.db = StateBackend(str(self.db_path))
+        self.event_bus = EventBus(events_dir=str(self.events_dir), db_path=str(self.db_path))
+
+    def _wait_for_daemon(self):
+        """Wait for the daemon to become ready."""
         max_wait = 5
         wait_interval = 0.1
         elapsed = 0
         
-        while not self.socket_path.exists() and elapsed < max_wait:
-            time.sleep(wait_interval)
+        ready = False
+        while not ready and elapsed < max_wait:
+            if self.use_tcp:
+                # Poll TCP port
+                try:
+                    with socket.create_connection((self.tcp_host, self.tcp_port), timeout=wait_interval):
+                        ready = True
+                except (socket.timeout, ConnectionRefusedError):
+                    time.sleep(wait_interval)
+            else:
+                # Check for UNIX socket file
+                if self.socket_path.exists():
+                    ready = True
+                else:
+                    time.sleep(wait_interval)
+            
             elapsed += wait_interval
-        
-        if not self.socket_path.exists():
+
+        if not ready:
+            stdout, stderr = self.daemon_process.communicate()
+            print("DAEMON STDOUT:", stdout.decode())
+            print("DAEMON STDERR:", stderr.decode())
             raise RuntimeError("Daemon failed to start within timeout")
-        
-        # Initialize client and other components
-        self.client = LikuClient(str(self.socket_path))
-        self.db = StateBackend(str(self.db_path))
-        self.event_bus = EventBus(events_dir=str(self.events_dir), db_path=str(self.db_path))
-    
+
     def stop(self):
         """Stop the LIKU daemon."""
         if self.daemon_process:
-            self.daemon_process.send_signal(signal.SIGINT)
-            self.daemon_process.wait(timeout=5)
+            if self.use_tcp:
+                self.daemon_process.terminate() # Use terminate on Windows
+            else:
+                self.daemon_process.send_signal(signal.SIGINT)
+            
+            try:
+                self.daemon_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.daemon_process.kill()
         
         if self.db:
             self.db.close()
 
 
+import shutil
+import unittest
+
+# ... (existing imports)
+
+@unittest.skipUnless(shutil.which("tmux"), "tmux is not available in the system PATH")
 class FullSystemTests(unittest.TestCase):
     """Integration tests for full LIKU system."""
     

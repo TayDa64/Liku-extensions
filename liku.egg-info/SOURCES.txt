@@ -14,9 +14,11 @@ liku.egg-info/dependency_links.txt
 liku.egg-info/entry_points.txt
 liku.egg-info/requires.txt
 liku.egg-info/top_level.txt
-tests/test_event_bus.py
+tests/test_doc_generator.py
 tests/test_event_bus_pytest.py
 tests/test_liku_client.py
+tests/test_liku_daemon.py
 tests/test_state_backend.py
 tests/test_tmux_manager.py
+tests/test_tmux_manager_pytest.py
 tests/test_watcher_factory.py

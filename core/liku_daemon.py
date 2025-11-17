@@ -10,12 +10,14 @@ import os
 import socket
 import sys
 import threading
+import yaml
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from event_bus import EventBus
-from state_backend import StateBackend
-from tmux_manager import TmuxManager
+from liku.event_bus import EventBus
+from liku.state_backend import StateBackend
+from liku.sandbox.factory import SandboxFactory
+from liku.sandbox.tmux_backend import TmuxSandbox
 
 # Platform detection for socket type
 SUPPORTS_UNIX_SOCKETS = hasattr(socket, 'AF_UNIX')
@@ -34,47 +36,59 @@ class LikuDaemon:
         tcp_port: Optional[int] = None,
         db_path: Optional[str] = None,
         events_dir: Optional[str] = None,
+        config_path: Optional[str] = None,
         use_tcp: bool = None
     ):
         """
         Initialize the LIKU daemon.
         
+        Reads configuration from environment variables if available, otherwise uses
+        defaults.
+        
         Args:
-            socket_path: Path to UNIX socket (default: ~/.liku/liku.sock) - Unix/Linux/macOS only
-            tcp_port: TCP port for localhost communication (default: 13337) - cross-platform
-            db_path: Path to SQLite database (default: ~/.liku/db/liku.db)
-            events_dir: Directory for event files (default: ~/.liku/state/events)
-            use_tcp: Force TCP mode even on Unix platforms (default: auto-detect)
+            socket_path: Path to UNIX socket (overrides env var)
+            tcp_port: TCP port for localhost communication (overrides env var)
+            db_path: Path to SQLite database (overrides env var)
+            events_dir: Directory for event files (overrides env var)
+            config_path: Path to agents.yaml config file (overrides env var)
+            use_tcp: Force TCP mode even on Unix platforms (overrides env var)
         """
         home = Path.home()
-        
-        # Determine communication mode
+
+        # Determine communication mode from env or args
         if use_tcp is None:
-            # Auto-detect: use TCP on Windows, UNIX sockets on Unix
-            self.use_tcp = not SUPPORTS_UNIX_SOCKETS
+            use_tcp_env = os.getenv("LIKU_USE_TCP", "auto")
+            self.use_tcp = not SUPPORTS_UNIX_SOCKETS if use_tcp_env == "auto" else use_tcp_env == "1"
         else:
             self.use_tcp = use_tcp
-        
+
         # Setup communication endpoint
         if self.use_tcp:
-            self.tcp_port = tcp_port or DEFAULT_TCP_PORT
+            self.tcp_port = tcp_port or int(os.getenv("LIKU_TCP_PORT", DEFAULT_TCP_PORT))
             self.tcp_host = "127.0.0.1"
             self.socket_path = None
             endpoint = f"TCP {self.tcp_host}:{self.tcp_port}"
         else:
-            self.socket_path = socket_path or str(home / ".liku" / "liku.sock")
+            self.socket_path = socket_path or os.getenv("LIKU_SOCKET_PATH") or str(home / ".liku" / "liku.sock")
             self.tcp_port = None
             self.tcp_host = None
             endpoint = f"UNIX {self.socket_path}"
-        
-        # Setup paths
-        self.db_path = db_path or str(home / ".liku" / "db" / "liku.db")
-        self.events_dir = events_dir or str(home / ".liku" / "state" / "events")
-        
+
+        # Setup paths from env or args
+        self.db_path = db_path or os.getenv("LIKU_DB_PATH") or str(home / ".liku" / "db" / "liku.db")
+        self.events_dir = events_dir or os.getenv("LIKU_EVENTS_DIR") or str(home / ".liku" / "state" / "events")
+        self.config_path = config_path or os.getenv("LIKU_CONFIG_PATH") or str(Path(__file__).parent.parent / "config" / "agents.yaml")
+
+        # Ensure directories exist
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(self.events_dir).mkdir(parents=True, exist_ok=True)
+
+        # Load security policies
+        self._load_agent_configs()
+
         # Initialize components
         self.state_backend = StateBackend(self.db_path)
         self.event_bus = EventBus(events_dir=self.events_dir, db_path=self.db_path)
-        self.tmux_manager = TmuxManager(event_bus=self.event_bus)
         
         # Server state
         self.running = False
@@ -84,7 +98,62 @@ class LikuDaemon:
         print(f"  Endpoint: {endpoint}")
         print(f"  Database: {self.db_path}")
         print(f"  Events: {self.events_dir}")
-    
+        print(f"  Config: {self.config_path}")
+
+    def _load_agent_configs(self):
+        """Load agent configurations and security policies from YAML file."""
+        self.agent_configs: Dict[str, Any] = {}
+        self.global_policies: Dict[str, Any] = {}
+        try:
+            with open(self.config_path, 'r') as f:
+                data = yaml.safe_load(f)
+            
+            self.global_policies = data.get("global_policies", {})
+            
+            agent_list = data.get("agents", [])
+            for agent_config in agent_list:
+                if "name" in agent_config:
+                    self.agent_configs[agent_config["name"]] = agent_config
+
+            print(f"Loaded {len(self.agent_configs)} agent configs and global policies.")
+
+        except FileNotFoundError:
+            print(f"Warning: Config file not found at {self.config_path}. No policies will be applied.")
+        except (yaml.YAMLError, Exception) as e:
+            print(f"Warning: Error parsing config file {self.config_path}: {e}. No policies will be applied.")
+
+    def _is_command_allowed(self, agent_name: Optional[str], command: str) -> bool:
+        """Check if a command is allowed by the security policies."""
+        if not command:
+            return True # Allowing empty commands
+
+        # 1. Check against global blacklist
+        blocked_commands = self.global_policies.get("blocked_commands", [])
+        if any(command.strip().startswith(blocked) for blocked in blocked_commands):
+            print(f"Security: Denied globally blocked command for agent '{agent_name}': {command}")
+            return False
+
+        # If there's no agent context, only global blacklist applies
+        if not agent_name:
+            return True
+
+        # 2. Check against agent-specific whitelist
+        agent_conf = self.agent_configs.get(agent_name)
+        if not agent_conf:
+            return True # No specific policy for this agent, so allow
+
+        agent_policies = agent_conf.get("policies", {})
+        allowed_commands = agent_policies.get("allowed_commands")
+
+        # If a whitelist is defined and not empty, the command must be on it.
+        if allowed_commands:
+            command_base = command.strip().split()[0]
+            if command_base not in allowed_commands:
+                print(f"Security: Denied command for agent '{agent_name}' not in whitelist: {command}")
+                return False
+        
+        return True
+
     def start(self):
         """Start the daemon server."""
         if self.use_tcp:
@@ -205,24 +274,25 @@ class LikuDaemon:
         elif action == "get_events":
             return self._get_events(request)
         
-        # Tmux operations
+        # Tmux-specific operations (temporary direct access)
         elif action == "list_sessions":
             return self._list_sessions()
         
         elif action == "list_panes":
             return self._list_panes(request)
         
-        elif action == "create_pane":
-            return self._create_pane(request)
+        # Sandbox operations
+        elif action == "create_pane": # Legacy name, now means create_sandbox_resource
+            return self._create_sandbox_resource(request)
         
-        elif action == "kill_pane":
-            return self._kill_pane(request)
+        elif action == "kill_pane": # Legacy name
+            return self._kill_sandbox_resource(request)
         
         elif action == "send_keys":
             return self._send_keys(request)
         
-        elif action == "capture_pane":
-            return self._capture_pane(request)
+        elif action == "capture_pane": # Legacy name
+            return self._capture_sandbox_output(request)
         
         # State operations
         elif action == "get_agent_sessions":
@@ -270,11 +340,13 @@ class LikuDaemon:
         
         return {"status": "ok", "events": events}
     
-    # Tmux handlers
+    # Tmux-specific handlers (leaky abstraction for now)
     
     def _list_sessions(self) -> Dict[str, Any]:
         """List tmux sessions."""
-        sessions = self.tmux_manager.list_sessions()
+        # This is a tmux-specific operation. We instantiate the backend directly.
+        tmux_sandbox = TmuxSandbox(self.event_bus)
+        sessions = tmux_sandbox.tmux_manager.list_sessions()
         
         return {
             "status": "ok",
@@ -291,9 +363,10 @@ class LikuDaemon:
     
     def _list_panes(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """List tmux panes."""
+        # This is a tmux-specific operation.
         session = request.get("session")
-        
-        panes = self.tmux_manager.list_panes(session)
+        tmux_sandbox = TmuxSandbox(self.event_bus)
+        panes = tmux_sandbox.tmux_manager.list_panes(session)
         
         return {
             "status": "ok",
@@ -311,69 +384,112 @@ class LikuDaemon:
                 for p in panes
             ]
         }
-    
-    def _create_pane(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Create a tmux pane."""
-        session = request.get("session")
+
+    # Sandbox handlers
+
+    def _create_sandbox_resource(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a resource in the appropriate sandbox."""
+        agent_name = request.get("agent_name")
+        session_key = request.get("session") # 'session' is the legacy key for session_key
         command = request.get("command")
-        vertical = request.get("vertical", False)
-        agent_name = request.get("agent_name")
-        
-        if not session:
-            return {"status": "error", "error": "Missing 'session'"}
-        
-        pane = self.tmux_manager.create_pane(
-            session=session,
-            command=command,
-            vertical=vertical,
-            agent_name=agent_name
-        )
-        
-        return {
-            "status": "ok",
-            "pane": {
-                "pane_id": pane.pane_id,
-                "pane_pid": pane.pane_pid
-            }
-        }
-    
-    def _kill_pane(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Kill a tmux pane."""
-        pane_id = request.get("pane_id")
-        agent_name = request.get("agent_name")
-        
+
+        if not agent_name or not session_key:
+            return {"status": "error", "error": "Missing 'agent_name' or 'session'"}
+
+        # Start with the base config from agents.yaml
+        agent_config = self.agent_configs.get(agent_name, {}).copy()
+
+        # Load agent.json and merge its settings
+        try:
+            agent_json_path = Path(__file__).parent.parent / "agents" / agent_name / "agent.json"
+            if agent_json_path.exists():
+                with open(agent_json_path, 'r') as f:
+                    agent_json_config = json.load(f)
+                
+                # Merge policies, with agent.json taking precedence
+                if "policies" in agent_json_config:
+                    agent_config.setdefault("policies", {}).update(agent_json_config["policies"])
+
+        except Exception as e:
+            print(f"Warning: Could not load or parse agent.json for '{agent_name}': {e}")
+
+        sandbox = SandboxFactory.get_sandbox(agent_config, self.global_policies, self.event_bus)
+
+        try:
+            resource = sandbox.create(
+                agent_name=agent_name,
+                session_key=session_key,
+                command=command,
+                config=agent_config
+            )
+            return {"status": "ok", "pane": {"pane_id": resource.id, "pane_pid": resource.pid}}
+        except Exception as e:
+            return {"status": "error", "error": f"Failed to create sandbox resource: {e}"}
+
+    def _kill_sandbox_resource(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Kill/destroy a sandbox resource."""
+        pane_id = request.get("pane_id") # Legacy name
         if not pane_id:
             return {"status": "error", "error": "Missing 'pane_id'"}
+
+        session = self.state_backend.get_agent_session_by_pane_id(pane_id)
+        agent_name = session.get("agent_name") if session else None
+        agent_config = self.agent_configs.get(agent_name, {}) if agent_name else {}
         
-        self.tmux_manager.kill_pane(pane_id=pane_id, agent_name=agent_name)
+        sandbox = SandboxFactory.get_sandbox(agent_config, self.global_policies, self.event_bus)
         
-        return {"status": "ok"}
-    
+        try:
+            sandbox.kill(resource_id=pane_id, agent_name=agent_name)
+            return {"status": "ok"}
+        except Exception as e:
+            return {"status": "error", "error": f"Failed to kill sandbox resource: {e}"}
+
     def _send_keys(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Send keys to a tmux pane."""
+        """Send keys to a resource, with security validation."""
         pane_id = request.get("pane_id")
         keys = request.get("keys")
         literal = request.get("literal", False)
         
         if not pane_id or not keys:
             return {"status": "error", "error": "Missing 'pane_id' or 'keys'"}
+
+        # Security Validation
+        session = self.state_backend.get_agent_session_by_pane_id(pane_id)
+        agent_name = session.get("agent_name") if session else None
+        if not self._is_command_allowed(agent_name, keys):
+            return {"status": "error", "error": f"Command denied by security policy for agent '{agent_name}': {keys}"}
         
-        self.tmux_manager.send_keys(pane_id=pane_id, keys=keys, literal=literal)
+        # Get sandbox and execute
+        agent_config = self.agent_configs.get(agent_name, {}) if agent_name else {}
+        sandbox = SandboxFactory.get_sandbox(agent_config, self.global_policies, self.event_bus)
         
-        return {"status": "ok"}
-    
-    def _capture_pane(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Capture tmux pane output."""
+        try:
+            sandbox.execute(resource_id=pane_id, command=keys, literal=literal)
+            return {"status": "ok"}
+        except Exception as e:
+            return {"status": "error", "error": f"Failed to send keys to sandbox resource: {e}"}
+
+    def _capture_sandbox_output(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Capture output from a sandbox resource."""
         pane_id = request.get("pane_id")
-        start = request.get("start", -50)
+        lines = request.get("start", -50) # Legacy key
         
         if not pane_id:
             return {"status": "error", "error": "Missing 'pane_id'"}
         
-        output = self.tmux_manager.capture_pane(pane_id=pane_id, start=start)
-        
-        return {"status": "ok", "output": output}
-    
+        session = self.state_backend.get_agent_session_by_pane_id(pane_id)
+        agent_name = session.get("agent_name") if session else None
+        agent_config = self.agent_configs.get(agent_name, {}) if agent_name else {}
+
+        sandbox = SandboxFactory.get_sandbox(agent_config, self.global_policies, self.event_bus)
+
+        try:
+            # The 'start' parameter in the old API was negative, so we make it positive for 'lines'
+            output = sandbox.capture_output(resource_id=pane_id, lines=abs(lines))
+            return {"status": "ok", "output": output}
+        except Exception as e:
+            return {"status": "error", "error": f"Failed to capture sandbox output: {e}"}
+
     # State handlers
     
     def _get_agent_sessions(self) -> Dict[str, Any]:

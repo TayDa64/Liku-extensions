@@ -1,4 +1,6 @@
 psutil>=5.9.0
+PyYAML>=6.0
+docker>=7.0.0
 
 [dev]
 pytest>=7.4.0
