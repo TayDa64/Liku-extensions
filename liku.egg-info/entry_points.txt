@@ -1,0 +1,4 @@
+[console_scripts]
+liku-daemon = liku.liku_daemon:main
+liku-event = liku.event_bus:main
+liku-tmux = liku.tmux_manager:main

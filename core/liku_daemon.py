@@ -8,6 +8,7 @@ Exposes UNIX socket API for CLI clients and optional HTTP REST API.
 import json
 import os
 import socket
+import sys
 import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -15,6 +16,10 @@ from typing import Any, Dict, Optional
 from event_bus import EventBus
 from state_backend import StateBackend
 from tmux_manager import TmuxManager
+
+# Platform detection for socket type
+SUPPORTS_UNIX_SOCKETS = hasattr(socket, 'AF_UNIX')
+DEFAULT_TCP_PORT = 13337
 
 
 class LikuDaemon:
@@ -26,21 +31,43 @@ class LikuDaemon:
     def __init__(
         self,
         socket_path: Optional[str] = None,
+        tcp_port: Optional[int] = None,
         db_path: Optional[str] = None,
-        events_dir: Optional[str] = None
+        events_dir: Optional[str] = None,
+        use_tcp: bool = None
     ):
         """
         Initialize the LIKU daemon.
         
         Args:
-            socket_path: Path to UNIX socket (default: ~/.liku/liku.sock)
+            socket_path: Path to UNIX socket (default: ~/.liku/liku.sock) - Unix/Linux/macOS only
+            tcp_port: TCP port for localhost communication (default: 13337) - cross-platform
             db_path: Path to SQLite database (default: ~/.liku/db/liku.db)
             events_dir: Directory for event files (default: ~/.liku/state/events)
+            use_tcp: Force TCP mode even on Unix platforms (default: auto-detect)
         """
         home = Path.home()
         
+        # Determine communication mode
+        if use_tcp is None:
+            # Auto-detect: use TCP on Windows, UNIX sockets on Unix
+            self.use_tcp = not SUPPORTS_UNIX_SOCKETS
+        else:
+            self.use_tcp = use_tcp
+        
+        # Setup communication endpoint
+        if self.use_tcp:
+            self.tcp_port = tcp_port or DEFAULT_TCP_PORT
+            self.tcp_host = "127.0.0.1"
+            self.socket_path = None
+            endpoint = f"TCP {self.tcp_host}:{self.tcp_port}"
+        else:
+            self.socket_path = socket_path or str(home / ".liku" / "liku.sock")
+            self.tcp_port = None
+            self.tcp_host = None
+            endpoint = f"UNIX {self.socket_path}"
+        
         # Setup paths
-        self.socket_path = socket_path or str(home / ".liku" / "liku.sock")
         self.db_path = db_path or str(home / ".liku" / "db" / "liku.db")
         self.events_dir = events_dir or str(home / ".liku" / "state" / "events")
         
@@ -54,26 +81,35 @@ class LikuDaemon:
         self.socket_server: Optional[socket.socket] = None
         
         print(f"LIKU Daemon initialized")
-        print(f"  Socket: {self.socket_path}")
+        print(f"  Endpoint: {endpoint}")
         print(f"  Database: {self.db_path}")
         print(f"  Events: {self.events_dir}")
     
     def start(self):
         """Start the daemon server."""
-        # Remove existing socket if present
-        if os.path.exists(self.socket_path):
-            os.unlink(self.socket_path)
-        
-        # Create UNIX socket
-        self.socket_server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.socket_server.bind(self.socket_path)
-        self.socket_server.listen(5)
-        
-        # Set socket permissions
-        os.chmod(self.socket_path, 0o600)
-        
-        self.running = True
-        print(f"LIKU Daemon listening on {self.socket_path}")
+        if self.use_tcp:
+            # TCP socket for cross-platform support
+            self.socket_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.socket_server.bind((self.tcp_host, self.tcp_port))
+            self.socket_server.listen(5)
+            
+            self.running = True
+            print(f"LIKU Daemon listening on {self.tcp_host}:{self.tcp_port}")
+        else:
+            # UNIX socket for Unix/Linux/macOS
+            if os.path.exists(self.socket_path):
+                os.unlink(self.socket_path)
+            
+            self.socket_server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.socket_server.bind(self.socket_path)
+            self.socket_server.listen(5)
+            
+            # Set socket permissions
+            os.chmod(self.socket_path, 0o600)
+            
+            self.running = True
+            print(f"LIKU Daemon listening on {self.socket_path}")
         
         # Accept connections
         while self.running:
@@ -92,7 +128,8 @@ class LikuDaemon:
                 print("\nShutting down daemon...")
                 break
             except Exception as e:
-                print(f"Error accepting connection: {e}")
+                if self.running:  # Only print if not intentionally stopping
+                    print(f"Error accepting connection: {e}")
         
         self.stop()
     
@@ -101,10 +138,16 @@ class LikuDaemon:
         self.running = False
         
         if self.socket_server:
-            self.socket_server.close()
+            try:
+                self.socket_server.close()
+            except Exception:
+                pass
         
-        if os.path.exists(self.socket_path):
-            os.unlink(self.socket_path)
+        if self.socket_path and os.path.exists(self.socket_path):
+            try:
+                os.unlink(self.socket_path)
+            except Exception:
+                pass
         
         print("LIKU Daemon stopped")
     

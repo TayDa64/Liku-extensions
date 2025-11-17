@@ -59,7 +59,8 @@ class EventBus:
         Returns:
             Path to the created event file
         """
-        timestamp = datetime.utcnow().isoformat() + "Z"
+        from datetime import timezone
+        timestamp = datetime.now(timezone.utc).isoformat()
         
         # Normalize payload
         if payload is None:
@@ -87,6 +88,7 @@ class EventBus:
         with open(event_file, 'w') as f:
             json.dump(event, f)
             f.write('\n')
+            f.flush()  # Ensure data is written immediately
         
         # Also store in SQLite if available
         if self.db:

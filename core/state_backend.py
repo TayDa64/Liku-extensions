@@ -446,6 +446,12 @@ class StateBackend:
         if hasattr(self._local, 'connection'):
             self._local.connection.close()
             del self._local.connection
+    
+    def close_all_connections(self):
+        """Close all database connections (for cleanup in tests)."""
+        # Close thread-local connection if exists
+        self.close()
+        # Note: Threading.local() connections are per-thread, so only close current thread
 
 
 def main():

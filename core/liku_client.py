@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """
 Python client library for communicating with the LIKU daemon.
-Provides high-level API for LIKU operations via UNIX socket.
+Provides high-level API for LIKU operations via UNIX socket or TCP.
 """
 
 import json
 import socket
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Platform detection for socket type
+SUPPORTS_UNIX_SOCKETS = hasattr(socket, 'AF_UNIX')
+DEFAULT_TCP_PORT = 13337
 
 
 class LikuClient:
@@ -15,15 +20,40 @@ class LikuClient:
     Client for communicating with LIKU daemon.
     """
     
-    def __init__(self, socket_path: Optional[str] = None):
+    def __init__(
+        self,
+        socket_path: Optional[str] = None,
+        tcp_port: Optional[int] = None,
+        tcp_host: str = "127.0.0.1",
+        use_tcp: bool = None
+    ):
         """
-        Initialize LIKU client.
+        Initialize the LIKU client.
         
         Args:
-            socket_path: Path to UNIX socket (default: ~/.liku/liku.sock)
+            socket_path: Path to daemon UNIX socket (default: ~/.liku/liku.sock) - Unix only
+            tcp_port: TCP port for daemon connection (default: 13337) - cross-platform
+            tcp_host: TCP host address (default: 127.0.0.1)
+            use_tcp: Force TCP mode even on Unix platforms (default: auto-detect)
         """
         home = Path.home()
-        self.socket_path = socket_path or str(home / ".liku" / "liku.sock")
+        
+        # Determine communication mode
+        if use_tcp is None:
+            # Auto-detect: use TCP on Windows, UNIX sockets on Unix
+            self.use_tcp = not SUPPORTS_UNIX_SOCKETS
+        else:
+            self.use_tcp = use_tcp
+        
+        # Setup communication endpoint
+        if self.use_tcp:
+            self.tcp_port = tcp_port or DEFAULT_TCP_PORT
+            self.tcp_host = tcp_host
+            self.socket_path = None
+        else:
+            self.socket_path = socket_path or str(home / ".liku" / "liku.sock")
+            self.tcp_port = None
+            self.tcp_host = None
     
     def _send_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -41,8 +71,12 @@ class LikuClient:
         """
         try:
             # Connect to daemon
-            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.connect(self.socket_path)
+            if self.use_tcp:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.connect((self.tcp_host, self.tcp_port))
+            else:
+                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                sock.connect(self.socket_path)
             
             # Send request
             sock.sendall(json.dumps(request).encode())
