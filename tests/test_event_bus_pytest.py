@@ -54,7 +54,8 @@ class TestEventBusBasic:
         events = state_backend.get_events(event_type="test.db_event", limit=1)
         assert len(events) == 1
         assert events[0]["event_type"] == "test.db_event"
-        assert json.loads(events[0]["payload"])["key"] == "value"
+        # state_backend.get_events already parses payload to dict
+        assert events[0]["payload"]["key"] == "value"
     
     def test_emit_multiple_events(self, event_bus, state_backend):
         """Test emitting multiple events."""
@@ -85,7 +86,8 @@ class TestEventBusBasic:
         # Filter by type
         type_a_events = event_bus.get_recent_events(event_type="type.a")
         assert len(type_a_events) == 2
-        assert all(e["type"] == "type.a" for e in type_a_events)
+        # When using database, events have 'event_type' key; when using files, they have 'type' key
+        assert all(e.get("event_type", e.get("type")) == "type.a" for e in type_a_events)
 
 
 class TestEventBusStreaming:

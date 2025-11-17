@@ -27,8 +27,14 @@ from liku_daemon import LikuDaemon
 @pytest.fixture
 def temp_dir() -> Generator[Path, None, None]:
     """Create a temporary directory for test files."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        yield Path(tmpdir)
+    # On Windows, set ignore_cleanup_errors to handle file locks
+    import sys
+    if sys.platform == 'win32':
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            yield Path(tmpdir)
+    else:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield Path(tmpdir)
 
 
 @pytest.fixture
@@ -55,15 +61,27 @@ def state_backend(test_db_path: str) -> Generator[StateBackend, None, None]:
         backend.close_all_connections()
     except Exception:
         pass
+    # Force garbage collection to release db connections
+    import gc
+    gc.collect()
     # Give Windows time to release file locks
     import time
-    time.sleep(0.1)
+    time.sleep(0.2)
 
 
 @pytest.fixture
-def event_bus(test_events_dir: str, test_db_path: str) -> EventBus:
+def event_bus(test_events_dir: str, test_db_path: str) -> Generator[EventBus, None, None]:
     """Create an EventBus instance with temporary paths."""
-    return EventBus(events_dir=test_events_dir, db_path=test_db_path)
+    bus = EventBus(events_dir=test_events_dir, db_path=test_db_path)
+    yield bus
+    # Cleanup database connections
+    if bus.db:
+        try:
+            bus.db.close_all_connections()
+        except Exception:
+            pass
+    import gc
+    gc.collect()
 
 
 @pytest.fixture
