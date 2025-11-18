@@ -4,6 +4,7 @@ from textual.widgets import Header, Footer, DataTable, Input, Button, Static
 from textual.containers import Horizontal, Vertical
 from spawn_util import spawn_agent
 from database import init_db, log_event
+import subprocess, platform, re
 
 DB_NAME = "liku_memory.db"
 
@@ -34,11 +35,18 @@ class StreamControl(App):
             with Vertical(id="streams"):
                 dt = DataTable(id="table")
                 yield dt
+                with Horizontal():
+                    yield Button("Scan Devices", id="scan")
+                    yield Button("Use Selected", id="use_device")
+                dev = DataTable(id="devices")
+                yield dev
         yield Footer()
 
     def on_mount(self) -> None:
         dt = self.query_one(DataTable)
         dt.add_columns("Name", "Input", "URL", "VBit", "ABit", "Status", "Updated")
+        dev = self.query("#devices").first(DataTable)
+        dev.add_columns("Type", "Name", "Spec")
         self.set_interval(1.0, self.refresh_streams)
 
     def refresh_streams(self) -> None:
@@ -98,6 +106,69 @@ class StreamControl(App):
             "START": "START_REQUESTED",
             "STOP": "STOP_REQUESTED",
             "UPDATE": "UPDATE_REQUESTED",
+    def _scan_devices(self):
+        system = platform.system()
+        entries = []
+        try:
+            if system == 'Windows':
+                # dshow lists devices via stderr
+                proc = subprocess.run(['ffmpeg', '-hide_banner', '-f', 'dshow', '-list_devices', 'true', '-i', 'dummy'], capture_output=True, text=True)
+                text = proc.stderr
+                kind = None
+                for line in text.splitlines():
+                    if 'DirectShow video devices' in line:
+                        kind = 'video'
+                    elif 'DirectShow audio devices' in line:
+                        kind = 'audio'
+                    m = re.search(r'\s*"([^"]+)"', line)
+                    if m and kind:
+                        name = m.group(1)
+                        spec = f'dshow:{kind}="{name}"' if kind == 'video' else f'dshow:{kind}="{name}"'
+                        entries.append((kind, name, spec))
+            elif system == 'Darwin':
+                proc = subprocess.run(['ffmpeg', '-hide_banner', '-f', 'avfoundation', '-list_devices', 'true', '-i', '""'], capture_output=True, text=True)
+                text = proc.stderr
+                for line in text.splitlines():
+                    m = re.search(r'\[(\d+)\] (.+)$', line.strip())
+                    if m:
+                        idx, name = m.groups()
+                        spec = f'avfoundation:{idx}:'
+                        entries.append(('avfoundation', name, spec))
+            else:
+                # Linux: list v4l2 devices via v4l2-ctl if available
+                proc = subprocess.run(['bash','-lc','v4l2-ctl --list-devices'], capture_output=True, text=True)
+                block = None
+                if proc.returncode == 0:
+                    for line in proc.stdout.splitlines():
+                        if not line.startswith('\t') and line.strip():
+                            block = line.strip()
+                        elif line.startswith('\t'):
+                            dev = line.strip()
+                            spec = f'v4l2:{dev}'
+                            entries.append(('v4l2', block, spec))
+        except Exception:
+            pass
+        dev = self.query('#devices').first(DataTable)
+        dev.clear()
+        for e in entries:
+            dev.add_row(*e)
+
+    def on_button_pressed(self, ev: Button.Pressed) -> None:
+        if ev.button.id == "start":
+            self.action_start()
+        elif ev.button.id == "stop":
+            self.action_stop()
+        elif ev.button.id == "update":
+            self.action_update()
+        elif ev.button.id == "scan":
+            self._scan_devices()
+        elif ev.button.id == "use_device":
+            dev = self.query('#devices').first(DataTable)
+            if dev.row_count:
+                row = dev.get_row_at(dev.cursor_row)
+                if row and len(row) >= 3:
+                    self.query_one('#input', Input).value = row[2]
+
         }.get(cmd, "REQUESTED")
         c.execute("INSERT OR REPLACE INTO streams(name,input,url,vbit,abit,status,last_update) VALUES(?,?,?,?,?,?,?)",
                   (name, inp, url, vbit, abit, status, datetime.now()))

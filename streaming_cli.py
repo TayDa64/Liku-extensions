@@ -5,8 +5,15 @@ import urllib.parse
 import subprocess, argparse, sys
 
 def build_command(args):
-    if args.input.lower() == 'desktop' and platform.system() == 'Windows':
+    in_lower = args.input.lower()
+    if in_lower == 'desktop' and platform.system() == 'Windows':
         src = ["-f", "gdigrab", "-framerate", "30", "-i", "desktop"]
+    elif in_lower.startswith('dshow:'):
+        src = ["-f", "dshow", "-i", args.input.split(':',1)[1]]
+    elif in_lower.startswith('avfoundation:'):
+        src = ["-f", "avfoundation", "-i", args.input.split(':',1)[1]]
+    elif in_lower.startswith('v4l2:'):
+        src = ["-f", "v4l2", "-i", args.input.split(':',1)[1]]
     else:
         src = ["-re", "-i", args.input]
     # auto-select container based on URL scheme
