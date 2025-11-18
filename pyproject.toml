@@ -33,6 +33,7 @@ dependencies = [
     "psutil>=5.9.0",
     "PyYAML>=6.0",
     "docker>=7.0.0",
+    "textual>=0.60.0",
 ]
 
 [project.optional-dependencies]

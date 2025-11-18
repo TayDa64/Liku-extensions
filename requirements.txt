@@ -9,3 +9,4 @@
 
 # Core dependencies
 psutil>=5.9.0  # For process management and orphaned pane detection
+textual>=0.60.0  # For TUI dashboard
