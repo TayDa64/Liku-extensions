@@ -31,6 +31,7 @@ class StreamControl(App):
                 with Horizontal():
                     yield Button("Start", id="start")
                     yield Button("Stop", id="stop")
+                    yield Button("Stop All", id="stop_all")
                     yield Button("Update", id="update")
                     yield Button("Preview", id="preview")
             with Vertical(id="streams"):
@@ -94,19 +95,27 @@ class StreamControl(App):
             dev = self.query('#devices').first(DataTable)
             # Guard: require at least one row and a valid cursor
             try:
-                row_count = getattr(dev, "row_count", 0)
+                # Textual 0.70+: rows property; fallback to private API length
+                row_count = getattr(dev, "row_count", None)
+                if row_count is None:
+                    row_count = len(getattr(dev, "_rows", []))
                 if row_count == 0:
+                    self.notify("No devices found. Ensure ffmpeg is installed and accessible in PATH.")
                     return
-                row_index = dev.cursor_row if dev.cursor_row is not None else 0
+                # Prefer first row if no cursor
+                row_index = dev.cursor_row if getattr(dev, "cursor_row", None) is not None else 0
                 if hasattr(dev, "is_valid_row_index") and not dev.is_valid_row_index(row_index):
-                    return
+                    row_index = 0
                 row = dev.get_row_at(row_index)
-            except Exception:
+            except Exception as e:
+                self.notify(f"Device selection failed: {e}")
                 return
             if row and len(row) >= 3:
                 # row: (Type, Name, Spec)
                 spec = row[2]
                 self.query_one('#input', Input).value = spec
+        elif ev.button.id == "stop_all":
+            self._stop_all_streams()
 
 
     def _issue_cmd(self, cmd: str) -> None:
@@ -190,12 +199,30 @@ class StreamControl(App):
         dev.clear()
         for e in entries:
             dev.add_row(*e)
+        if entries:
             try:
                 dev.focus()
                 dev.cursor_type = "row"
                 dev.cursor_coordinate = (0, 0)
             except Exception:
                 pass
+
+    def _stop_all_streams(self):
+        # Mark all active streams for STOP and emit TASKs
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute("CREATE TABLE IF NOT EXISTS streams(name TEXT PRIMARY KEY, input TEXT, url TEXT, vbit TEXT, abit TEXT, status TEXT, last_update TIMESTAMP)")
+        rows = c.execute("SELECT name,input,url,vbit,abit FROM streams WHERE COALESCE(status,'') NOT LIKE 'STOP%' ").fetchall()
+        from datetime import datetime
+        for name, inp, url, vbit, abit in rows:
+            c.execute("UPDATE streams SET status=?, last_update=? WHERE name=?", ("STOP_REQUESTED", datetime.now(), name))
+            log_event("ControlCenter", f"[P2] STREAM_CMD STOP {name} input={inp} url={url} vbit={vbit} abit={abit}", "TASK")
+        conn.commit()
+        conn.close()
+        try:
+            self.notify(f"Stop requested for {len(rows)} stream(s).")
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
