@@ -32,6 +32,7 @@ class StreamControl(App):
                     yield Button("Start", id="start")
                     yield Button("Stop", id="stop")
                     yield Button("Update", id="update")
+                    yield Button("Preview", id="preview")
             with Vertical(id="streams"):
                 dt = DataTable(id="table")
                 yield dt
@@ -106,6 +107,19 @@ class StreamControl(App):
             "START": "START_REQUESTED",
             "STOP": "STOP_REQUESTED",
             "UPDATE": "UPDATE_REQUESTED",
+        }.get(cmd, "REQUESTED")
+        c.execute("INSERT OR REPLACE INTO streams(name,input,url,vbit,abit,status,last_update) VALUES(?,?,?,?,?,?,?)",
+                  (name, inp, url, vbit, abit, status, datetime.now()))
+        conn.commit()
+        conn.close()
+        # write TASK for agents to consume
+        msg = f"[P2] STREAM_CMD {cmd} {name} input={inp} url={url} vbit={vbit} abit={abit}"
+        log_event("ControlCenter", msg, "TASK")
+        if cmd == "START":
+            # try to spawn dedicated agent
+            spawn_agent(f"StreamAgent-{name}", f"ffmpeg streaming for {name}")
+            log_event("ControlCenter", f"Spawn requested for StreamAgent-{name}", "SPAWN")
+
     def _scan_devices(self):
         system = platform.system()
         entries = []
@@ -168,6 +182,65 @@ class StreamControl(App):
                 row = dev.get_row_at(dev.cursor_row)
                 if row and len(row) >= 3:
                     self.query_one('#input', Input).value = row[2]
+        elif ev.button.id == "preview":
+            spec = self.query_one('#input', Input).value.strip()
+            if not spec:
+                return
+            try:
+                system = platform.system()
+                if spec.lower() == 'desktop' and system == 'Windows':
+                    cmd = ['ffplay','-f','gdigrab','-i','desktop']
+                elif spec.startswith('dshow:'):
+                    cmd = ['ffplay','-f','dshow','-i', spec.split(':',1)[1]]
+                elif spec.startswith('avfoundation:'):
+                    cmd = ['ffplay','-f','avfoundation','-i', spec.split(':',1)[1]]
+                elif spec.startswith('v4l2:'):
+                    cmd = ['ffplay','-f','video4linux2','-i', spec.split(':',1)[1]]
+                else:
+                    cmd = ['ffplay', spec]
+                subprocess.Popen(cmd)
+            except Exception:
+                pass
+            pass
+        dev = self.query('#devices').first(DataTable)
+        dev.clear()
+        for e in entries:
+            dev.add_row(*e)
+
+    def on_button_pressed(self, ev: Button.Pressed) -> None:
+        if ev.button.id == "start":
+            self.action_start()
+        elif ev.button.id == "stop":
+            self.action_stop()
+        elif ev.button.id == "update":
+            self.action_update()
+        elif ev.button.id == "scan":
+            self._scan_devices()
+        elif ev.button.id == "use_device":
+            dev = self.query('#devices').first(DataTable)
+            if dev.row_count:
+                row = dev.get_row_at(dev.cursor_row)
+                if row and len(row) >= 3:
+                    self.query_one('#input', Input).value = row[2]
+        elif ev.button.id == "preview":
+            spec = self.query_one('#input', Input).value.strip()
+            if not spec:
+                return
+            try:
+                system = platform.system()
+                if spec.lower() == 'desktop' and system == 'Windows':
+                    cmd = ['ffplay','-f','gdigrab','-i','desktop']
+                elif spec.startswith('dshow:'):
+                    cmd = ['ffplay','-f','dshow','-i', spec.split(':',1)[1]]
+                elif spec.startswith('avfoundation:'):
+                    cmd = ['ffplay','-f','avfoundation','-i', spec.split(':',1)[1]]
+                elif spec.startswith('v4l2:'):
+                    cmd = ['ffplay','-f','video4linux2','-i', spec.split(':',1)[1]]
+                else:
+                    cmd = ['ffplay', spec]
+                subprocess.Popen(cmd)
+            except Exception:
+                pass
 
         }.get(cmd, "REQUESTED")
         c.execute("INSERT OR REPLACE INTO streams(name,input,url,vbit,abit,status,last_update) VALUES(?,?,?,?,?,?,?)",
