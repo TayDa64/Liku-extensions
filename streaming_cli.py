@@ -9,6 +9,7 @@ def build_command(args):
     if in_lower == 'desktop' and platform.system() == 'Windows':
         src = ["-f", "gdigrab", "-framerate", "30", "-i", "desktop"]
     elif in_lower.startswith('dshow:'):
+        # args.input pattern: dshow:video="<name>" or dshow:audio="<name>"
         src = ["-f", "dshow", "-i", args.input.split(':',1)[1]]
     elif in_lower.startswith('avfoundation:'):
         src = ["-f", "avfoundation", "-i", args.input.split(':',1)[1]]

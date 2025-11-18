@@ -44,10 +44,11 @@ class StreamControl(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        dt = self.query_one(DataTable)
+        dt = self.query_one('#table', DataTable)
         dt.add_columns("Name", "Input", "URL", "VBit", "ABit", "Status", "Updated")
-        dev = self.query("#devices").first(DataTable)
+        dev = self.query_one('#devices', DataTable)
         dev.add_columns("Type", "Name", "Spec")
+        self.device_entries = []
         self.set_interval(1.0, self.refresh_streams)
 
     def refresh_streams(self) -> None:
@@ -66,7 +67,7 @@ class StreamControl(App):
         """)
         rows = c.execute("SELECT name,input,url,vbit,abit,status,last_update FROM streams ORDER BY name").fetchall()
         conn.close()
-        dt = self.query_one(DataTable)
+        dt = self.query_one('#table', DataTable)
         dt.clear()
         for r in rows:
             dt.add_row(*[str(x) for x in r])
@@ -87,6 +88,26 @@ class StreamControl(App):
             self.action_stop()
         elif ev.button.id == "update":
             self.action_update()
+        elif ev.button.id == "scan":
+            self._scan_devices()
+        elif ev.button.id == "use_device":
+            dev = self.query('#devices').first(DataTable)
+            # Guard: require at least one row and a valid cursor
+            try:
+                row_count = getattr(dev, "row_count", 0)
+                if row_count == 0:
+                    return
+                row_index = dev.cursor_row if dev.cursor_row is not None else 0
+                if hasattr(dev, "is_valid_row_index") and not dev.is_valid_row_index(row_index):
+                    return
+                row = dev.get_row_at(row_index)
+            except Exception:
+                return
+            if row and len(row) >= 3:
+                # row: (Type, Name, Spec)
+                spec = row[2]
+                self.query_one('#input', Input).value = spec
+
 
     def _issue_cmd(self, cmd: str) -> None:
         name = self.query_one("#name", Input).value.strip() or "stream"
@@ -137,13 +158,14 @@ class StreamControl(App):
                     m = re.search(r'\s*"([^"]+)"', line)
                     if m and kind:
                         name = m.group(1)
-                        spec = f'dshow:{kind}="{name}"' if kind == 'video' else f'dshow:{kind}="{name}"'
+                        # For dshow, ffmpeg expects -f dshow -i video="<name>" or audio="<name>"
+                        spec = f'dshow:{kind}="{name}"'
                         entries.append((kind, name, spec))
             elif system == 'Darwin':
                 proc = subprocess.run(['ffmpeg', '-hide_banner', '-f', 'avfoundation', '-list_devices', 'true', '-i', '""'], capture_output=True, text=True)
                 text = proc.stderr
                 for line in text.splitlines():
-                    m = re.search(r'\[(\d+)\] (.+)$', line.strip())
+                    m = re.search(r'\[(\d+)\]\s+(.+)$', line.strip())
                     if m:
                         idx, name = m.groups()
                         spec = f'avfoundation:{idx}:'
@@ -151,8 +173,8 @@ class StreamControl(App):
             else:
                 # Linux: list v4l2 devices via v4l2-ctl if available
                 proc = subprocess.run(['bash','-lc','v4l2-ctl --list-devices'], capture_output=True, text=True)
-                block = None
                 if proc.returncode == 0:
+                    block = None
                     for line in proc.stdout.splitlines():
                         if not line.startswith('\t') and line.strip():
                             block = line.strip()
@@ -162,98 +184,19 @@ class StreamControl(App):
                             entries.append(('v4l2', block, spec))
         except Exception:
             pass
-        dev = self.query('#devices').first(DataTable)
+        # remember entries and update UI
+        self.device_entries = entries
+        dev = self.query_one('#devices', DataTable)
         dev.clear()
         for e in entries:
             dev.add_row(*e)
-
-    def on_button_pressed(self, ev: Button.Pressed) -> None:
-        if ev.button.id == "start":
-            self.action_start()
-        elif ev.button.id == "stop":
-            self.action_stop()
-        elif ev.button.id == "update":
-            self.action_update()
-        elif ev.button.id == "scan":
-            self._scan_devices()
-        elif ev.button.id == "use_device":
-            dev = self.query('#devices').first(DataTable)
-            if dev.row_count:
-                row = dev.get_row_at(dev.cursor_row)
-                if row and len(row) >= 3:
-                    self.query_one('#input', Input).value = row[2]
-        elif ev.button.id == "preview":
-            spec = self.query_one('#input', Input).value.strip()
-            if not spec:
-                return
             try:
-                system = platform.system()
-                if spec.lower() == 'desktop' and system == 'Windows':
-                    cmd = ['ffplay','-f','gdigrab','-i','desktop']
-                elif spec.startswith('dshow:'):
-                    cmd = ['ffplay','-f','dshow','-i', spec.split(':',1)[1]]
-                elif spec.startswith('avfoundation:'):
-                    cmd = ['ffplay','-f','avfoundation','-i', spec.split(':',1)[1]]
-                elif spec.startswith('v4l2:'):
-                    cmd = ['ffplay','-f','video4linux2','-i', spec.split(':',1)[1]]
-                else:
-                    cmd = ['ffplay', spec]
-                subprocess.Popen(cmd)
-            except Exception:
-                pass
-            pass
-        dev = self.query('#devices').first(DataTable)
-        dev.clear()
-        for e in entries:
-            dev.add_row(*e)
-
-    def on_button_pressed(self, ev: Button.Pressed) -> None:
-        if ev.button.id == "start":
-            self.action_start()
-        elif ev.button.id == "stop":
-            self.action_stop()
-        elif ev.button.id == "update":
-            self.action_update()
-        elif ev.button.id == "scan":
-            self._scan_devices()
-        elif ev.button.id == "use_device":
-            dev = self.query('#devices').first(DataTable)
-            if dev.row_count:
-                row = dev.get_row_at(dev.cursor_row)
-                if row and len(row) >= 3:
-                    self.query_one('#input', Input).value = row[2]
-        elif ev.button.id == "preview":
-            spec = self.query_one('#input', Input).value.strip()
-            if not spec:
-                return
-            try:
-                system = platform.system()
-                if spec.lower() == 'desktop' and system == 'Windows':
-                    cmd = ['ffplay','-f','gdigrab','-i','desktop']
-                elif spec.startswith('dshow:'):
-                    cmd = ['ffplay','-f','dshow','-i', spec.split(':',1)[1]]
-                elif spec.startswith('avfoundation:'):
-                    cmd = ['ffplay','-f','avfoundation','-i', spec.split(':',1)[1]]
-                elif spec.startswith('v4l2:'):
-                    cmd = ['ffplay','-f','video4linux2','-i', spec.split(':',1)[1]]
-                else:
-                    cmd = ['ffplay', spec]
-                subprocess.Popen(cmd)
+                dev.focus()
+                dev.cursor_type = "row"
+                dev.cursor_coordinate = (0, 0)
             except Exception:
                 pass
 
-        }.get(cmd, "REQUESTED")
-        c.execute("INSERT OR REPLACE INTO streams(name,input,url,vbit,abit,status,last_update) VALUES(?,?,?,?,?,?,?)",
-                  (name, inp, url, vbit, abit, status, datetime.now()))
-        conn.commit()
-        conn.close()
-        # write TASK for agents to consume
-        msg = f"[P2] STREAM_CMD {cmd} {name} input={inp} url={url} vbit={vbit} abit={abit}"
-        log_event("ControlCenter", msg, "TASK")
-        if cmd == "START":
-            # try to spawn dedicated agent
-            spawn_agent(f"StreamAgent-{name}", f"ffmpeg streaming for {name}")
-            log_event("ControlCenter", f"Spawn requested for StreamAgent-{name}", "SPAWN")
 
 if __name__ == "__main__":
     init_db()
