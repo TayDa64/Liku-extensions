@@ -4,6 +4,7 @@ import platform
 import sqlite3
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, DataTable, Input
+# unified spawn handled in spawn_util.py
 
 DB_NAME = "liku_memory.db"
 
@@ -48,22 +49,10 @@ class BookkeeperApp(App):
             self.notify("Format: Name | Goal", severity="error")
 
     def spawn_agent_window(self, name: str, goal: str) -> None:
-        cmd = [sys.executable, "agent_runner.py", name, goal]
-        if platform.system() == "Windows":
-            full_cmd = f'start "{name}" cmd /k ' + " ".join(cmd)
-            subprocess.Popen(full_cmd, shell=True)
-        elif platform.system() == "Darwin":
-            script = f'''tell application "Terminal"\n    do script "python3 {' '.join(cmd)}"\nend tell'''
-            subprocess.Popen(["osascript", "-e", script])
-        else:
-            for terminal in (["gnome-terminal", "--"] , ["xterm", "-e"]):
-                try:
-                    subprocess.Popen(list(terminal) + cmd)
-            # convenience: allow entering TASK directly e.g. TASK: Transcode file
-        
-                    break
-                except FileNotFoundError:
-                    continue
+        from spawn_util import spawn_agent
+        from database import log_event
+        ok = spawn_agent(name, goal)
+        log_event("Bookkeeper", f"Spawn {'success' if ok else 'failed'} for {name}", "SPAWN")
 
 if __name__ == "__main__":
     from database import init_db
