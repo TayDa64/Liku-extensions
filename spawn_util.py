@@ -5,9 +5,16 @@ def spawn_agent(name: str, goal: str) -> bool:
     system = platform.system()
     try:
         if system == "Windows":
-            # Use cmd start to open new window that keeps running
-            full = f'start "{name}" cmd /k ' + " ".join(cmd)
-            subprocess.Popen(full, shell=True)
+            import shutil
+            py = sys.executable
+            try:
+                if shutil.which("wt.exe"):
+                    subprocess.Popen(["wt", "-w", "0", "new-tab", py] + cmd[1:])
+                else:
+                    subprocess.Popen(cmd, creationflags=0x00000010)  # CREATE_NEW_CONSOLE
+            except Exception:
+                full = f'start "{name}" cmd /k ' + " ".join(cmd)
+                subprocess.Popen(full, shell=True)
         elif system == "Darwin":
             script = f'''tell application "Terminal"\n    do script "python3 {' '.join(cmd)}"\nend tell'''
             subprocess.Popen(["osascript", "-e", script])
