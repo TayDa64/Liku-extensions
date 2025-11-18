@@ -29,11 +29,15 @@ class BookkeeperApp(App):
         c = conn.cursor()
         c.execute("SELECT timestamp, agent_name, type, message FROM logs ORDER BY id DESC LIMIT 20")
         rows = c.fetchall()
+        # summary results per agent
+        summary = c.execute("SELECT agent_name, COUNT(*) FROM logs WHERE type='RESULT' GROUP BY agent_name").fetchall()
         conn.close()
         table = self.query_one(DataTable)
         table.clear()
         for row in rows:
             table.add_row(*[str(x) for x in row])
+        if summary:
+            table.add_row("---", "SUMMARY", "RESULTS", ", ".join(f"{a}:{cnt}" for a,cnt in summary))
 
     def on_input_submitted(self, message: Input.Submitted) -> None:
         try:
@@ -55,6 +59,8 @@ class BookkeeperApp(App):
             for terminal in (["gnome-terminal", "--"] , ["xterm", "-e"]):
                 try:
                     subprocess.Popen(list(terminal) + cmd)
+            # convenience: allow entering TASK directly e.g. TASK: Transcode file
+        
                     break
                 except FileNotFoundError:
                     continue
