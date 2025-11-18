@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import platform
+import urllib.parse
 
 import subprocess, argparse, sys
 
@@ -8,8 +9,18 @@ def build_command(args):
         src = ["-f", "gdigrab", "-framerate", "30", "-i", "desktop"]
     else:
         src = ["-re", "-i", args.input]
-    cmd = ["ffmpeg"] + src + ["-c:v", args.vcodec, "-b:v", args.bitrate,
-           "-c:a", args.acodec, "-f", args.format, args.url]
+    # auto-select container based on URL scheme
+    scheme = urllib.parse.urlparse(args.url).scheme.lower()
+    out_fmt = args.format
+    if scheme in ("rtmp", "rtmps"):
+        out_fmt = "flv"
+    elif scheme in ("tcp", "udp", "srt"):
+        out_fmt = "mpegts"
+    cmd = ["ffmpeg"] + src + [
+        "-c:v", args.vcodec, "-preset", "veryfast", "-tune", "zerolatency",
+        "-b:v", args.bitrate, "-pix_fmt", "yuv420p",
+        "-c:a", args.acodec, "-f", out_fmt, args.url
+    ]
     return cmd
 
 def run_stream(args):
