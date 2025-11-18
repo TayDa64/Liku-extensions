@@ -1,0 +1,61 @@
+Screen {
+    background: $surface;
+    color: $text;
+}
+
+#app-grid {
+    layout: grid;
+    grid-size: 2;
+    grid-columns: 40 1fr;
+    grid-rows: 1fr;
+    height: 100%;
+    width: 100%;
+    gap: 1;
+    padding: 0 1;
+}
+
+#controls {
+    padding: 1;
+    border: round $primary;
+    background: $primary-background;
+    overflow-y: auto;
+}
+
+#devices-container {
+    border: round $accent;
+    background: $accent-background;
+}
+
+.title {
+    content-align: center middle;
+    width: 100%;
+    margin-bottom: 1;
+    text-style: bold underline;
+}
+
+#controls .title {
+    text-align: center;
+    text-style: bold;
+}
+
+#controls Static {
+    margin-top: 1;
+}
+
+DataTable {
+    height: 1fr;
+    margin-bottom: 1;
+}
+
+.buttons {
+    align: center middle;
+    width: 100%;
+    height: auto;
+    margin-top: 1;
+}
+
+Button {
+    min-width: 8;
+    width: auto;
+    margin: 0 1;
+}
