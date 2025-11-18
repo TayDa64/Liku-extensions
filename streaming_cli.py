@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
+import platform
+
 import subprocess, argparse, sys
 
 def build_command(args):
-    cmd = ["ffmpeg", "-re", "-i", args.input, "-c:v", args.vcodec, "-b:v", args.bitrate,
+    if args.input.lower() == 'desktop' and platform.system() == 'Windows':
+        src = ["-f", "gdigrab", "-framerate", "30", "-i", "desktop"]
+    else:
+        src = ["-re", "-i", args.input]
+    cmd = ["ffmpeg"] + src + ["-c:v", args.vcodec, "-b:v", args.bitrate,
            "-c:a", args.acodec, "-f", args.format, args.url]
     return cmd
 

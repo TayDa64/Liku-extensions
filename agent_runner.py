@@ -75,9 +75,28 @@ if __name__ == "__main__":
                     task_core = task_msg
                 print(f"[{agent_name}] Consuming TASK {task_id} (P{priority}): {task_core}")
                 log_event(agent_name, f"Consumed task {task_id} priority {priority}", "TASK_CONSUMED")
-                # simulate result
-                result = f"Result for task {task_id}: done"
-                log_event(agent_name, result, "RESULT")
+                # execute stream command
+                import shlex, platform, subprocess
+                parts = task_core.split()
+                # expected: STREAM_CMD <CMD> <name> key=val ...
+                if parts and parts[0] == 'STREAM_CMD' and len(parts) >= 3:
+                    cmd_word = parts[1]
+                    kv = {k:v for k,v in (p.split('=',1) for p in parts[3:] if '=' in p)}
+                    name = parts[2]
+                    inp = kv.get('input','')
+                    url = kv.get('url','')
+                    vbit = kv.get('vbit','2500k')
+                    abit = kv.get('abit','128k')
+                    if cmd_word == 'START':
+                        cli = [sys.executable, 'streaming_cli.py']
+                        args = ['--input', inp, '--url', url, '--bitrate', vbit, '--vcodec', 'libx264', '--acodec', 'aac', '--format', 'flv']
+                        try:
+                            subprocess.Popen(cli + args)
+                            log_event(agent_name, f"Started streaming job for {name}", "RESULT")
+                        except Exception as e:
+                            log_event(agent_name, f"Failed to start stream: {e}", "ERROR")
+                    elif cmd_word == 'STOP':
+                        log_event(agent_name, f"Stop requested for {name} (not implemented)", "RESULT")
                 c.execute("UPDATE agents SET last_task_id=? WHERE name=?", (task_id, agent_name))
                 conn.commit()
             conn.close()
