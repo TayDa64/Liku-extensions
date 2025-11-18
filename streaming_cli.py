@@ -7,7 +7,7 @@ import subprocess, argparse, sys
 def build_command(args):
     in_lower = args.input.lower()
     if in_lower == 'desktop' and platform.system() == 'Windows':
-        src = ["-f", "gdigrab", "-framerate", "30", "-i", "desktop"]
+        src = ["-f", "gdigrab", "-thread_queue_size", "256", "-probesize", "10M", "-framerate", "30", "-i", "desktop"]
     elif in_lower.startswith('dshow:'):
         # args.input pattern: dshow:video="<name>" or dshow:audio="<name>"
         src = ["-f", "dshow", "-i", args.input.split(':',1)[1]]

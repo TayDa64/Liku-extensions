@@ -162,10 +162,15 @@ class StreamControl(App):
                 for line in text.splitlines():
                     if 'DirectShow video devices' in line:
                         kind = 'video'
-                    elif 'DirectShow audio devices' in line:
+                        continue
+                    if 'DirectShow audio devices' in line:
                         kind = 'audio'
+                        continue
+                    if 'Alternative name' in line:
+                        # skip GUID-style alternative names
+                        continue
                     m = re.search(r'\s*"([^"]+)"', line)
-                    if m and kind:
+                    if m and kind in ('video','audio'):
                         name = m.group(1)
                         # For dshow, ffmpeg expects -f dshow -i video="<name>" or audio="<name>"
                         spec = f'dshow:{kind}="{name}"'
@@ -216,9 +221,30 @@ class StreamControl(App):
         from datetime import datetime
         for name, inp, url, vbit, abit in rows:
             c.execute("UPDATE streams SET status=?, last_update=? WHERE name=?", ("STOP_REQUESTED", datetime.now(), name))
-            log_event("ControlCenter", f"[P2] STREAM_CMD STOP {name} input={inp} url={url} vbit={vbit} abit={abit}", "TASK")
+            try:
+                log_event("ControlCenter", f"[P2] STREAM_CMD STOP {name} input={inp} url={url} vbit={vbit} abit={abit}", "TASK")
+            except Exception:
+                pass
         conn.commit()
         conn.close()
+        # Optionally, kill ffmpeg processes tagged with the stream name
+        try:
+            if platform.system() == 'Windows':
+                # best-effort terminate matching processes
+                subprocess.run(["powershell", "-NoProfile", "Get-Process ffmpeg -ErrorAction SilentlyContinue | Stop-Process -Force"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                subprocess.run(["pkill", "-f", "ffmpeg"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+        from datetime import datetime
+        for name, inp, url, vbit, abit in rows:
+            c.execute("UPDATE streams SET status=?, last_update=? WHERE name=?", ("STOP_REQUESTED", datetime.now(), name))
+        conn.commit()
+        conn.close()
+        # Emit TASKs after closing connection to avoid DB locks
+        for name, inp, url, vbit, abit in rows:
+            log_event("ControlCenter", f"[P2] STREAM_CMD STOP {name} input={inp} url={url} vbit={vbit} abit={abit}", "TASK")
         try:
             self.notify(f"Stop requested for {len(rows)} stream(s).")
         except Exception:
