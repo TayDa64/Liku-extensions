@@ -1,0 +1,7 @@
+{
+    "name": "SnapshotAgent",
+    "description": "An agent that can capture a snapshot of a specific window to provide visual proof.",
+    "author": "Gemini",
+    "version": "0.1.0",
+    "entrypoint": "run.sh"
+}
