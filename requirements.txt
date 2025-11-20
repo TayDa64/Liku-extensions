@@ -13,3 +13,5 @@ textual>=0.60.0  # For TUI dashboard
 pygetwindow>=0.0.9
 pywin32>=306
 playwright>=1.40.0 # For browser automation and web inspection
+google-auth>=2.20.0 # For authentication
+google-generativeai>=0.5.0 # For Gemini API

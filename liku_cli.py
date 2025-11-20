@@ -85,6 +85,86 @@ def list_windows_command(args):
         if window.title:
             print(f"- {window.title}")
 
+async def inspect_web_dom(args):
+    """Uses Playwright to inspect a DOM element."""
+    if not args.selector:
+        print("Error: --selector is required for dom check.", file=sys.stderr)
+        return
+
+    print(f"Inspecting DOM for selector '{args.selector}' at {args.url}")
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        
+        try:
+            await page.goto(args.url, wait_until="networkidle")
+            element = await page.query_selector(args.selector)
+            if element:
+                if args.attribute:
+                    attribute_value = await element.get_attribute(args.attribute)
+                    print(f"Attribute '{args.attribute}': {attribute_value}")
+                else:
+                    text_content = await element.text_content()
+                    print(f"Text content: {text_content}")
+            else:
+                print(f"Error: Element not found for selector '{args.selector}'", file=sys.stderr)
+
+        except Exception as e:
+            print(f"Error inspecting DOM: {e}", file=sys.stderr)
+
+        await browser.close()
+
+async def inspect_web_screenshot(args):
+    """Uses Playwright to take a screenshot of a specific element."""
+    if not args.selector or not args.output:
+        print("Error: --selector and --output are required for screenshot check.", file=sys.stderr)
+        return
+
+    print(f"Taking a screenshot of '{args.selector}' at {args.url}")
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        
+        try:
+            await page.goto(args.url, wait_until="networkidle")
+            element = await page.query_selector(args.selector)
+            if element:
+                await element.screenshot(path=args.output)
+                print(f"Screenshot saved to {args.output}")
+            else:
+                print(f"Error: Element not found for selector '{args.selector}'", file=sys.stderr)
+
+        except Exception as e:
+            print(f"Error taking screenshot: {e}", file=sys.stderr)
+
+        await browser.close()
+
+async def inspect_web_network(args):
+    """Uses Playwright to inspect network requests."""
+    print(f"Inspecting network for URL: {args.url}")
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        
+        requests = []
+        page.on("request", lambda request: requests.append(request))
+        
+        try:
+            await page.goto(args.url, wait_until="networkidle")
+            print("Page loaded. Found network requests:")
+            if requests:
+                print("--- NETWORK REQUESTS ---")
+                for request in requests:
+                    print(f"  - {request.method} {request.url}")
+                print("------------------------")
+            else:
+                print("  No network requests found.")
+
+        except Exception as e:
+            print(f"Error navigating to page: {e}", file=sys.stderr)
+
+        await browser.close()
+
 async def inspect_web_console(args):
     """Uses Playwright to inspect the web console for errors."""
     print(f"Inspecting console for URL: {args.url}")
@@ -115,8 +195,14 @@ def inspect_web_command(args):
     """Dispatcher for inspect-web commands."""
     if args.check == "console":
         asyncio.run(inspect_web_console(args))
+    elif args.check == "network":
+        asyncio.run(inspect_web_network(args))
+    elif args.check == "screenshot":
+        asyncio.run(inspect_web_screenshot(args))
+    elif args.check == "dom":
+        asyncio.run(inspect_web_dom(args))
     else:
-        print(f"Error: Unknown check '{args.check}'. Valid options are: console", file=sys.stderr)
+        print(f"Error: Unknown check '{args.check}'. Valid options are: console, network, screenshot, dom", file=sys.stderr)
 
 def main():
     """Main entry point for the Liku CLI."""
@@ -162,7 +248,10 @@ Examples:
     # --- Inspect Web Command ---
     parser_inspect_web = subparsers.add_parser("inspect-web", help="Inspect a web page using headless browser.")
     parser_inspect_web.add_argument("--url", required=True, help="The URL of the web page to inspect.")
-    parser_inspect_web.add_argument("--check", required=True, choices=['console'], help="The specific check to perform.")
+    parser_inspect_web.add_argument("--check", required=True, choices=['console', 'network', 'screenshot', 'dom'], help="The specific check to perform.")
+    parser_inspect_web.add_argument("--selector", help="CSS selector for the element to inspect (used with 'screenshot' and 'dom').")
+    parser_inspect_web.add_argument("--output", help="Output file path (used with 'screenshot').")
+    parser_inspect_web.add_argument("--attribute", help="Attribute to retrieve from the element (used with 'dom').")
     parser_inspect_web.set_defaults(func=inspect_web_command)
 
 

@@ -1,0 +1,49 @@
+/* tay_cli.css */
+
+Screen {
+    background: #0d1117; /* Dark background */
+    color: #c9d1d9;      /* Light text */
+}
+
+#main-container {
+    layout: vertical;
+    padding: 1;
+    height: 1fr; /* Allow flexible height to not push out footer */
+}
+
+#goal-container {
+    height: auto;
+    border: heavy #2f81f7;
+    margin-bottom: 1;
+}
+
+.title {
+    text-align: center;
+    text-style: bold;
+    padding: 0 1;
+}
+
+.goal-text {
+    padding: 0 1;
+}
+
+#log-panel {
+    height: 1fr;
+    border: round #388bfd;
+    padding: 0 1;
+    background: #161b22; /* Slightly lighter dark background */
+}
+
+Input {
+    dock: bottom;
+    margin-top: 1;
+    border: heavy #2f81f7;
+}
+
+Input:focus {
+    border: heavy #58a6ff; /* Brighter accent on focus */
+}
+
+Footer {
+    background: #0d1117;
+}
